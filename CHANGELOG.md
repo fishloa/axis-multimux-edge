@@ -1,9 +1,22 @@
 # Changelog
 
-All notable changes to `axis-origin` are documented here. The format
-follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+All notable changes to Multimux Edge (formerly `axis-origin`) are documented
+here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
+
+### Breaking
+
+- **Renamed to Multimux Edge.** The ACAP `appName` is now `multimuxedge`
+  (was `axisorigin`), with display name "Multimux Edge"; the crate and binary
+  are `multimux-edge`; the repository moved to
+  `github.com/fishloa/axis-multimux-edge`. Because `appName` changed:
+  - The camera treats this as a new app. Uninstall `axisorigin` before
+    installing `multimuxedge`; it does not upgrade in place.
+  - Saved settings do not carry over. The axparameter group is keyed by
+    `appName`, so the new app starts on defaults.
+  - URLs move from `/local/axisorigin/...` to `/local/multimuxedge/...`
+    (stream: `/local/multimuxedge/hls/cam/media.m3u8`).
 
 ### Fixed
 

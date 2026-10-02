@@ -18,7 +18,7 @@ VDO (libvdo) --coded AU + ts--> VdoIngestSession --> transmux Sample/TrackSpec
 - **`src/admin.rs`** — `Config` + `ConfigStore` (`axparameter` on device) +
   the `/admin/config` + `/admin/status` routes. See
   [Module Map](module-map.md) for the full breakdown.
-- **`src/bin/axis-origin.rs`** (`device`-gated) — the ACAP entrypoint: loads
+- **`src/bin/multimux-edge.rs`** (`device`-gated) — the ACAP entrypoint: loads
   config, runs the capture pipeline on a dedicated OS thread (VDO
   `next_buffer` blocks) via `multimux::supervise_driver`/
   `multimux::source::advance_route`, serves the origin + admin on

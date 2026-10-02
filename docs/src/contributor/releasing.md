@@ -10,7 +10,7 @@ trigger.
    aarch64/armv7hf — see [Supported Devices](../operator/supported-devices.md))
    builds a `.eap` for each and uploads it as a workflow artifact.
 2. The `release` job (gated on `startsWith(github.ref, 'refs/tags/v')`)
-   downloads every `axis-origin-*` artifact, renames each to
+   downloads every `multimux-edge-*` artifact, renames each to
    `<name>_<version>_<fw>_<arch>.eap`, generates a `SHA256SUMS` file, then
    creates (or reuses) a GitHub Release named after the tag and uploads the
    four `.eap`s + `SHA256SUMS` to it.
@@ -23,7 +23,7 @@ git push origin vX.Y.Z
 ```
 
 Then watch the Actions run (`gh run watch` or the Actions tab) — the
-release appears at `github.com/fishloa/axis-origin/releases/tag/vX.Y.Z`
+release appears at `github.com/fishloa/axis-multimux-edge/releases/tag/vX.Y.Z`
 once the `release` job completes.
 
 ## Moving a tag (fixing a bad release)

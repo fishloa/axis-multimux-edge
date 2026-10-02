@@ -1,8 +1,8 @@
 [book]
-title = "axis-origin"
+title = "Multimux Edge"
 authors = ["Alex Fishlock"]
 src = "src"
 
 [output.html]
-git-repository-url = "https://github.com/fishloa/axis-origin"
-site-url = "/axis-origin/"
+git-repository-url = "https://github.com/fishloa/axis-multimux-edge"
+site-url = "/axis-multimux-edge/"

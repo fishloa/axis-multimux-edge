@@ -2,18 +2,18 @@
 
 ## Access levels
 
-`axis-origin` registers two reverse-proxy paths with the camera's web
+`multimux-edge` registers two reverse-proxy paths with the camera's web
 server, each gated by a different VAPIX access level (`manifest.json`):
 
 | Path | `apiPath` | Access level |
 |---|---|---|
-| `https://<cam>/local/axisorigin/hls/...` | `hls` | `viewer` |
-| `https://<cam>/local/axisorigin/admin/...` | `admin` | `admin` |
+| `https://<cam>/local/multimuxedge/hls/...` | `hls` | `viewer` |
+| `https://<cam>/local/multimuxedge/admin/...` | `admin` | `admin` |
 
 This means: any account with **viewer** rights on the camera can pull the
 LL-HLS stream; only accounts with **admin** rights can read/write config or
 status. Grant camera accounts accordingly — a viewer-only account cannot
-read or change `axis-origin`'s configuration.
+read or change `multimux-edge`'s configuration.
 
 ## Local-only bind
 
@@ -31,4 +31,4 @@ to affect a running pipeline beyond what a restart itself does.
 ## Reporting a vulnerability
 
 Use the repository's standard GitHub issue/security-advisory process:
-[github.com/fishloa/axis-origin](https://github.com/fishloa/axis-origin).
+[github.com/fishloa/axis-multimux-edge](https://github.com/fishloa/axis-multimux-edge).

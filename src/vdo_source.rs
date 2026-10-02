@@ -2,7 +2,7 @@
 //! (Axis VDO — Video Capture API) to pull hardware-encoded H.264/H.265
 //! access units off a camera channel, and exposes them as a
 //! [`media_plane::ingress::IngestSession`] so this crate's own driving loop
-//! (`src/bin/axis-origin.rs`'s `run_vdo_capture`, over
+//! (`src/bin/multimux-edge.rs`'s `run_vdo_capture`, over
 //! [`multimux::supervise_driver`]/[`multimux::source::advance_route`]) can
 //! segment them straight into LL-HLS. Conversion of an Annex B access unit
 //! into a [`transmux::pipeline::Sample`]/[`transmux::pipeline::TrackSpec`] is
@@ -53,7 +53,7 @@
 //! camera produces the next frame (it is a synchronous FFI call into
 //! `libvdo.so`, not a `poll`-based async I/O source). `VdoIngestSession::feed`
 //! calls it directly and therefore blocks too. **Whoever drives the VDO
-//! capture loop (`src/bin/axis-origin.rs`'s `run_vdo_capture`, spawned by
+//! capture loop (`src/bin/multimux-edge.rs`'s `run_vdo_capture`, spawned by
 //! `spawn_capture_pipeline`) must ensure this blocking read does not stall
 //! other work on the same thread**: that function runs the whole
 //! capture/segment/store pipeline on its own `std::thread::spawn`'d OS thread

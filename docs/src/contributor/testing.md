@@ -19,7 +19,7 @@ doubles).
 
 ## Device build verification
 
-The `device`-gated code (`vdo_source.rs`, the `axis-origin` binary) can only
+The `device`-gated code (`vdo_source.rs`, the `multimux-edge` binary) can only
 be **compiled** on host CI (inside the ACAP SDK Docker — see
 [Building](building.md)); compiling is not the same as verifying it works.
 Compilation success is a prerequisite, not an acceptance criterion.
@@ -31,12 +31,12 @@ verified on a real ARTPEC-6/7/8/9 camera:
 
 1. The `.eap` installs and the app shows **running** in the camera's Apps
    list.
-2. `curl -u <user>:<pw> https://<cam>/local/axisorigin/hls/cam/media.m3u8`
+2. `curl -u <user>:<pw> https://<cam>/local/multimuxedge/hls/cam/media.m3u8`
    returns an LL-HLS media playlist (`#EXT-X-PART`, `#EXT-X-PART-INF`,
    `#EXT-X-SERVER-CONTROL`).
 3. A real LL-HLS player (Safari / hls.js / `ffplay`) plays **live** video via
    that URL at low latency.
-4. The admin settings page loads at `https://<cam>/local/axisorigin/` and a
+4. The admin settings page loads at `https://<cam>/local/multimuxedge/` and a
    config change (e.g. `part_target_ms`) takes effect after a restart.
 5. H.264 verified on all SoCs; H.265 verified additionally on
    ARTPEC-7/8/9 (see [Supported Devices](../operator/supported-devices.md)).
@@ -44,7 +44,7 @@ verified on a real ARTPEC-6/7/8/9 camera:
 > **Known verify-on-device detail:** the origin is served nested under
 > `/hls`; if the camera's reverse-proxy strips the `apiPath` segment before
 > forwarding, the nest prefix may need adjusting in
-> `src/bin/axis-origin.rs`'s `Router::nest("/hls", …)`. Confirm the actual
+> `src/bin/multimux-edge.rs`'s `Router::nest("/hls", …)`. Confirm the actual
 > proxied path on the device if the playlist 404s. Likewise confirm VDO
 > delivers Annex-B (start codes) — `convert` assumes it; if a given
 > camera/VDO version carries a different framing, `VdoIngestSession`'s

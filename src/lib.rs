@@ -1,4 +1,4 @@
-//! axis-origin — an Axis ACAP app that captures the camera's hardware-encoded
+//! multimux-edge — an Axis ACAP app that captures the camera's hardware-encoded
 //! H.264/H.265 stream via VDO and serves LL-HLS on the camera, reusing the
 //! `multimux` library. The pure `convert` module (VDO access unit -> IR sample)
 //! is host-testable; the `vdo_source` module + the binary are `device`-gated

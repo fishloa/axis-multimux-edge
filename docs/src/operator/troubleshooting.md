@@ -3,7 +3,7 @@
 ## Check `/admin/status` first
 
 ```bash
-curl -u <user>:<pw> https://<cam>/local/axisorigin/admin/status
+curl -u <user>:<pw> https://<cam>/local/multimuxedge/admin/status
 ```
 
 Returns:
@@ -27,16 +27,16 @@ Returns:
 - `current_segment`/`current_part`/`frames` not advancing over repeated
   polls — media is not flowing even though the process is up. Check VDO
   itself (is another app already holding the channel?) before assuming
-  `axis-origin` is at fault.
+  `multimux-edge` is at fault.
 
 ## Playlist 404s
 
 The origin serves LL-HLS nested under `/hls` inside the app
-(`https://<cam>/local/axisorigin/hls/...`). If your camera's reverse-proxy
+(`https://<cam>/local/multimuxedge/hls/...`). If your camera's reverse-proxy
 strips the `apiPath` segment differently than expected, the nest prefix
 seen by the app may not match. Confirm the actual proxied path reaching the
 app and, if needed, this is a code-level fix — see the nest configuration
-in `src/bin/axis-origin.rs` and [Building](../contributor/building.md) for
+in `src/bin/multimux-edge.rs` and [Building](../contributor/building.md) for
 how to rebuild.
 
 ## No video / garbled video

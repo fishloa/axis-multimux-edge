@@ -1,21 +1,21 @@
 [workspace]
 
 [package]
-name         = "axis-origin"
+name         = "multimux-edge"
 version      = "0.1.0"
 edition      = "2024"
 rust-version = "1.97"
 license      = "MIT OR Apache-2.0"
 description  = "Axis ACAP on-camera media origin: VDO capture → LL-HLS/DASH (built on multimux)"
-repository   = "https://github.com/fishloa/axis-origin"
+repository   = "https://github.com/fishloa/axis-multimux-edge"
 publish      = false
 
 [lib]
 path = "src/lib.rs"
 
 [[bin]]
-name              = "axis-origin"
-path              = "src/bin/axis-origin.rs"
+name              = "multimux-edge"
+path              = "src/bin/multimux-edge.rs"
 required-features = ["device"]
 
 [dependencies]
@@ -43,9 +43,9 @@ acap-logging = { git = "https://github.com/fishloa/acap-rs", rev = "3c513f92bf3d
 # 0.5 (issue #805) deleted `multimux::pipeline::{run_pipeline, SampleSource}`
 # in favour of this one ingest architecture, driven by
 # `multimux::supervise_driver`/`multimux::source::advance_route` (see
-# `src/bin/axis-origin.rs`). Optional + device-gated, like `vdo` itself,
+# `src/bin/multimux-edge.rs`). Optional + device-gated, like `vdo` itself,
 # since only `vdo_source.rs` needs them; versions pinned to exactly what
-# `multimux` 0.8 itself depends on, so `transmux::pipeline::{Sample,
+# `multimux` 0.10 itself depends on, so `transmux::pipeline::{Sample,
 # TrackSpec}`/`media_plane::trunk::RetentionClass` are the *same* types
 # `multimux::source::advance_route`/`SessionEvent` expect, not a second,
 # semver-incompatible copy.

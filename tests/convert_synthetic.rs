@@ -1,4 +1,4 @@
-//! Synthetic-H.264 conversion gate for `axis_origin::convert` (Task 2 of the
+//! Synthetic-H.264 conversion gate for `multimux_edge::convert` (Task 2 of the
 //! axis-origin plan, docs/superpowers/plans/2026-07-16-axis-origin.md).
 //!
 //! Hand-builds a minimal Annex B H.264 access unit (SPS + PPS + IDR slice,
@@ -13,7 +13,7 @@
 //! conformant `hvcC` requires a real camera SPS to decode. `track_spec` for
 //! H.265 is exercised against a real capture in the Task 7 hardware verify.
 
-use axis_origin::convert::{Codec, au_to_sample, duration_ticks, extract_param_sets, track_spec};
+use multimux_edge::convert::{Codec, au_to_sample, duration_ticks, extract_param_sets, track_spec};
 
 /// Real minimal H.264 SPS bytes (profile 0x42 = Baseline, level 0x1E = 3.0),
 /// the same known-good bytes transmux's `rtp_sdp` round-trip test uses

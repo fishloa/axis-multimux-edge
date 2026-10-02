@@ -1,6 +1,6 @@
 # Supported Devices
 
-`axis-origin` targets Axis cameras built on the **ARTPEC-6, 7, 8, and 9**
+`multimux-edge` targets Axis cameras built on the **ARTPEC-6, 7, 8, and 9**
 SoCs. Every release ships four `.eap` packages — one per (firmware,
 architecture) pair:
 
@@ -12,7 +12,7 @@ architecture) pair:
 | 12 | 12.1.0 | armv7hf | `fw12_armv7hf` |
 
 Match your camera's CPU architecture and installed firmware major version
-to pick the right file from a [release](https://github.com/fishloa/axis-origin/releases).
+to pick the right file from a [release](https://github.com/fishloa/axis-multimux-edge/releases).
 
 ## Codec support
 

@@ -1,4 +1,4 @@
-//! Admin config + status HTTP routes for axis-origin.
+//! Admin config + status HTTP routes for multimux-edge.
 //!
 //! `GET /admin/config` and `POST /admin/config` read/update the app's
 //! [`Config`] through a pluggable [`ConfigStore`]: [`DefaultStore`] (host
@@ -203,14 +203,14 @@ pub struct AxParameterStore {
 /// locate `/etc/dynamic/param/<appName>.conf`.
 ///
 /// This MUST match `manifest.json`'s `appName` exactly. It is **not**
-/// `"axis-origin"`: ACAP rejects a hyphen in `appName` (fixed in #669),
+/// `"multimux-edge"`: ACAP rejects a hyphen in `appName` (fixed in #669),
 /// and this string was missed at the time. Passing the hyphenated form makes
 /// libaxparameter look for a `.conf` that does not exist, so every `add`/`get`
 /// fails with "Failed to get real path for symlink
-/// /etc/dynamic/param/axis-origin.conf" — which is exactly how #955
+/// /etc/dynamic/param/multimux-edge.conf" — which is exactly how #955
 /// presented on a real camera.
 #[cfg(feature = "device")]
-pub const ACAP_APP_NAME: &str = "axisorigin";
+pub const ACAP_APP_NAME: &str = "multimuxedge";
 
 #[cfg(feature = "device")]
 impl AxParameterStore {
@@ -218,13 +218,13 @@ impl AxParameterStore {
     /// serialized under (as JSON).
     const PARAM_NAME: &'static str = "Config";
 
-    /// Open the `axis-origin` axparameter handle, creating the `Config`
+    /// Open the `multimux-edge` axparameter handle, creating the `Config`
     /// parameter if this is the first run on this camera.
     ///
     /// Issue #955: `store` called `Parameter::set("Config", …)` on a
     /// parameter that was never `add`ed, so persisting a config failed on
     /// every camera (`axparameter set: Failed to set parameter Config`) —
-    /// confirmed on-device: `param.cgi?action=list&group=axis-origin`
+    /// confirmed on-device: `param.cgi?action=list&group=multimux-edge`
     /// returned "Error -1 getting param in group". [`Self::ensure_parameter`]
     /// registers the parameter (with [`Config::default`] as its initial
     /// value) exactly once per camera, then every subsequent `new()` finds
@@ -346,7 +346,7 @@ pub struct Status {
 /// config-backend error tracked in a slot separate from the pipeline's own
 /// `last_error`. Kept apart so the capture pipeline's routine
 /// "clear the previous attempt's error at the start of a new one"
-/// (`run_vdo_capture` in the `axis-origin` binary) can never silently wipe
+/// (`run_vdo_capture` in the `multimux-edge` binary) can never silently wipe
 /// out evidence that the config store itself is broken — exactly the kind
 /// of masked failure issue #955 diagnosed in `ConfigStore::load` itself.
 #[derive(Default)]

@@ -2,8 +2,10 @@
     "schemaVersion": "1.5.0",
     "acapPackageConf": {
         "setup": {
-            "appName": "axisorigin",
+            "appName": "multimuxedge",
+            "friendlyName": "Multimux Edge",
             "vendor": "rust-broadcast",
+            "vendorUrl": "https://github.com/fishloa/axis-multimux-edge",
             "runMode": "respawn",
             "version": "0.1.0"
         },

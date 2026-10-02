@@ -138,26 +138,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "axis-origin"
-version = "0.1.0"
-dependencies = [
- "acap-logging",
- "axparameter",
- "axum",
- "broadcast-common",
- "log",
- "media-plane",
- "multimux",
- "serde",
- "serde_json",
- "thiserror 2.0.19",
- "tokio",
- "tower",
- "transmux",
- "vdo",
-]
-
-[[package]]
 name = "axparameter"
 version = "0.0.0"
 source = "git+https://github.com/fishloa/acap-rs?rev=3c513f92bf3dc2e6d1dbb1e3d5c00c0c294a6a69#3c513f92bf3dc2e6d1dbb1e3d5c00c0c294a6a69"
@@ -1603,6 +1583,26 @@ dependencies = [
  "tracing",
  "transmux",
  "url",
+]
+
+[[package]]
+name = "multimux-edge"
+version = "0.1.0"
+dependencies = [
+ "acap-logging",
+ "axparameter",
+ "axum",
+ "broadcast-common",
+ "log",
+ "media-plane",
+ "multimux",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
+ "tower",
+ "transmux",
+ "vdo",
 ]
 
 [[package]]
