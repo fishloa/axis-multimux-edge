@@ -1,17 +1,17 @@
 //! ACAP entrypoint (`device`-gated; only builds inside the Axis ACAP Native
 //! SDK sysroot). Wires the real capture -> LL-HLS pipeline together:
 //!
-//! - Loads [`axis_origin::admin::Config`] from the ACAP
-//!   `axparameter`-backed [`axis_origin::admin::AxParameterStore`].
+//! - Loads [`multimux_edge::admin::Config`] from the ACAP
+//!   `axparameter`-backed [`multimux_edge::admin::AxParameterStore`].
 //! - Builds a [`multimux::RouteHandle`] sized from the config's LL-HLS
 //!   tuning (target segment duration / part target / window).
-//! - Starts [`axis_origin::vdo_source::VdoIngestSession`] and drives it
+//! - Starts [`multimux_edge::vdo_source::VdoIngestSession`] and drives it
 //!   through [`multimux::supervise_driver`]/[`multimux::source::advance_route`]
 //!   on a **dedicated OS thread with its own current-thread tokio runtime** —
 //!   see "Threading" below.
 //! - Serves the LL-HLS origin (`multimux::origin::router`) nested under
 //!   `/hls`, merged with the admin config/status routes
-//!   (`axis_origin::admin::admin_router`), on `127.0.0.1:<port>` (matching
+//!   (`multimux_edge::admin::admin_router`), on `127.0.0.1:<port>` (matching
 //!   `manifest.json`'s `reverseProxy` targets).
 //!
 //! # Threading
@@ -43,9 +43,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use axis_origin::admin::{self, AxParameterStore, ConfigStore, StatusHandle};
-use axis_origin::convert::Codec;
-use axis_origin::vdo_source::VdoIngestSession;
+use multimux_edge::admin::{self, AxParameterStore, ConfigStore, StatusHandle};
+use multimux_edge::convert::Codec;
+use multimux_edge::vdo_source::VdoIngestSession;
 use broadcast_common::Timestamp;
 use log::{error, info};
 use media_plane::ingress::{HandshakePolicy, IngestDriver};
@@ -63,9 +63,9 @@ const STREAM_NAME: &str = "cam";
 
 /// The URL prefix AXIS OS's Apache reverse proxy forwards verbatim to this
 /// app — `/local/<appName>` with `appName` from `manifest.json`
-/// (`axisorigin`). The proxy does not strip it, so every route is served
+/// (`multimuxedge`). The proxy does not strip it, so every route is served
 /// under this prefix. Keep in lockstep with `manifest.json`'s `setup.appName`.
-const URL_PREFIX: &str = "/local/axisorigin";
+const URL_PREFIX: &str = "/local/multimuxedge";
 
 /// `Trunk` ring capacities for the VDO capture driver — this app's own
 /// choice (mirroring `multimux::source::driver_trunk_config`'s production
@@ -81,7 +81,7 @@ const DRIVER_PART_CAPACITY: usize = 64;
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
     acap_logging::init_logger();
-    info!("axis-origin: starting");
+    info!("multimux-edge: starting");
 
     // A failed config backend is LOUD but NOT fatal.
     //
@@ -94,7 +94,7 @@ async fn main() {
     let (store, store_open_error) = match AxParameterStore::new() {
         Ok(store) => (Arc::new(store), None),
         Err(e) => {
-            error!("axis-origin: axparameter store open failed, serving on defaults: {e}");
+            error!("multimux-edge: axparameter store open failed, serving on defaults: {e}");
             (
                 Arc::new(AxParameterStore::unavailable(e.to_string())),
                 Some(format!("config backend unavailable: {e}")),
@@ -117,11 +117,11 @@ async fn main() {
     // otherwise erase this within moments of boot.
     let outcome = store.load();
     if let Some(reason) = outcome.error() {
-        error!("axis-origin: config load failed, running on defaults: {reason}");
+        error!("multimux-edge: config load failed, running on defaults: {reason}");
         status.set_config_error(Some(format!("config load: {reason}")));
     }
     let cfg = outcome.into_config();
-    info!("axis-origin: loaded config: {cfg:?}");
+    info!("multimux-edge: loaded config: {cfg:?}");
 
     let route_handle = Arc::new(RouteHandle::new(
         cfg.target_duration_secs,
@@ -134,7 +134,7 @@ async fn main() {
     // `Config` carries no configurable playlist filename, so this app serves
     // LL-HLS's default media playlist name (`llhls::DEFAULT_PLAYLIST_NAME`,
     // `media.m3u8`) — matching the relative-URI playlists documented below
-    // (`/local/axisorigin/hls/<stream>/media.m3u8`).
+    // (`/local/multimuxedge/hls/<stream>/media.m3u8`).
     let outputs: Vec<Arc<dyn Output>> = vec![OutputKind::LlHls.build()];
     let mut streams = HashMap::new();
     streams.insert(STREAM_NAME.to_string(), (route_handle, outputs));
@@ -145,8 +145,8 @@ async fn main() {
     // prefix (confirmed on hardware, #669, and matches Axis's own C/CivetWeb
     // and axum reverse-proxy examples, which register routes at the full
     // prefixed path). So the app must serve its routes under the real proxied
-    // path: `/local/axisorigin/hls/<stream>/…` and
-    // `/local/axisorigin/admin/…`. The origin's playlists use relative URIs
+    // path: `/local/multimuxedge/hls/<stream>/…` and
+    // `/local/multimuxedge/admin/…`. The origin's playlists use relative URIs
     // (`media.m3u8`, `seg-*.m4s`), which resolve correctly under the prefix.
     let inner = axum::Router::new()
         .nest("/hls", multimux::origin::router(app_state))
@@ -157,14 +157,14 @@ async fn main() {
     let listener = match tokio::net::TcpListener::bind(&bind_addr).await {
         Ok(listener) => listener,
         Err(e) => {
-            error!("axis-origin: failed to bind {bind_addr}: {e}");
+            error!("multimux-edge: failed to bind {bind_addr}: {e}");
             std::process::exit(1);
         }
     };
-    info!("axis-origin: listening on {bind_addr}");
+    info!("multimux-edge: listening on {bind_addr}");
 
     if let Err(e) = axum::serve(listener, app).await {
-        error!("axis-origin: axum server error: {e}");
+        error!("multimux-edge: axum server error: {e}");
         std::process::exit(1);
     }
 }
@@ -343,7 +343,7 @@ async fn run_vdo_capture(
         media_plane::ingress::HealthState::Failed(e) => {
             let reason = e.to_string();
             status.set_last_error(Some(reason.clone()));
-            error!("axis-origin: VDO capture ended: {reason}");
+            error!("multimux-edge: VDO capture ended: {reason}");
             Err(MultimuxError::Connect { reason })
         }
         // A live camera channel has no natural clean end, but `Stage::finish`

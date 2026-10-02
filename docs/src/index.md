@@ -1,4 +1,4 @@
-# axis-origin
+# Multimux Edge
 
 An **Axis ACAP application** that captures the camera's hardware-encoded
 H.264/H.265 stream via **VDO** and serves **LL-HLS on the camera** — no
@@ -27,5 +27,5 @@ modules) is published alongside this guide at [`/api/`](api/index.html).
 
 ## Source
 
-[github.com/fishloa/axis-origin](https://github.com/fishloa/axis-origin) —
+[github.com/fishloa/axis-multimux-edge](https://github.com/fishloa/axis-multimux-edge) —
 MIT OR Apache-2.0.

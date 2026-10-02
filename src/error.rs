@@ -1,4 +1,4 @@
-//! Error type for axis-origin.
+//! Error type for multimux-edge.
 use thiserror::Error;
 
 #[derive(Debug, Error)]

@@ -1,4 +1,4 @@
-# axis-origin
+# Multimux Edge
 
 An **Axis ACAP application** that captures the camera's hardware-encoded
 H.264/H.265 stream via **VDO** and serves **LL-HLS on the camera** — no
@@ -9,19 +9,19 @@ ARTPEC-7/8/9 only.
 
 ## Documentation
 
-Full docs: **https://fishloa.github.io/axis-origin/**
+Full docs: **https://fishloa.github.io/axis-multimux-edge/**
 
-- [Installing](https://fishloa.github.io/axis-origin/operator/installing.html)
-- [Supported Devices](https://fishloa.github.io/axis-origin/operator/supported-devices.html)
-- [Configuration](https://fishloa.github.io/axis-origin/operator/configuration.html)
-- [Troubleshooting](https://fishloa.github.io/axis-origin/operator/troubleshooting.html)
-- [Security](https://fishloa.github.io/axis-origin/operator/security.html)
-- [Architecture](https://fishloa.github.io/axis-origin/contributor/architecture.html)
-- [Module Map](https://fishloa.github.io/axis-origin/contributor/module-map.html)
-- [Building](https://fishloa.github.io/axis-origin/contributor/building.html)
-- [Releasing](https://fishloa.github.io/axis-origin/contributor/releasing.html)
-- [Testing](https://fishloa.github.io/axis-origin/contributor/testing.html)
-- [API reference (rustdoc)](https://fishloa.github.io/axis-origin/api/)
+- [Installing](https://fishloa.github.io/axis-multimux-edge/operator/installing.html)
+- [Supported Devices](https://fishloa.github.io/axis-multimux-edge/operator/supported-devices.html)
+- [Configuration](https://fishloa.github.io/axis-multimux-edge/operator/configuration.html)
+- [Troubleshooting](https://fishloa.github.io/axis-multimux-edge/operator/troubleshooting.html)
+- [Security](https://fishloa.github.io/axis-multimux-edge/operator/security.html)
+- [Architecture](https://fishloa.github.io/axis-multimux-edge/contributor/architecture.html)
+- [Module Map](https://fishloa.github.io/axis-multimux-edge/contributor/module-map.html)
+- [Building](https://fishloa.github.io/axis-multimux-edge/contributor/building.html)
+- [Releasing](https://fishloa.github.io/axis-multimux-edge/contributor/releasing.html)
+- [Testing](https://fishloa.github.io/axis-multimux-edge/contributor/testing.html)
+- [API reference (rustdoc)](https://fishloa.github.io/axis-multimux-edge/api/)
 
 ## Quickstart
 
@@ -35,8 +35,8 @@ cargo-acap-sdk install --host "$AXIS_DEVICE_IP" --user root --pass "$AXIS_DEVICE
 cargo-acap-sdk start   --host "$AXIS_DEVICE_IP" --user root --pass "$AXIS_DEVICE_PASS"
 ```
 
-Grab a `.eap` from the [Releases page](https://github.com/fishloa/axis-origin/releases)
-— see the [Supported Devices](https://fishloa.github.io/axis-origin/operator/supported-devices.html)
+Grab a `.eap` from the [Releases page](https://github.com/fishloa/axis-multimux-edge/releases)
+— see the [Supported Devices](https://fishloa.github.io/axis-multimux-edge/operator/supported-devices.html)
 matrix for which file matches your camera.
 
 ## License

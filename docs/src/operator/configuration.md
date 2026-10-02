@@ -32,10 +32,10 @@ A `POST /admin/config` is rejected with `400 Bad Request` if:
 
 ```bash
 # Read the current config
-curl -u <user>:<pw> https://<cam>/local/axisorigin/admin/config
+curl -u <user>:<pw> https://<cam>/local/multimuxedge/admin/config
 
 # Update it (takes effect on next restart)
-curl -u <user>:<pw> -X POST https://<cam>/local/axisorigin/admin/config \
+curl -u <user>:<pw> -X POST https://<cam>/local/multimuxedge/admin/config \
   -H 'content-type: application/json' \
   -d '{"channel":0,"width":1920,"height":1080,"framerate":30,"codec":"h265","target_duration_secs":4.0,"part_target_ms":500,"window_segments":8,"port":2999}'
 ```

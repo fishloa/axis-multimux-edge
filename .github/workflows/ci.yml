@@ -1,4 +1,4 @@
-name: axis-origin
+name: multimux-edge
 
 on:
   pull_request:
@@ -142,12 +142,12 @@ jobs:
       - name: Build .eap (device feature)
         env:
           ACAP_BUILD_IMPL: equivalent
-        run: cargo-acap-build --target ${{ matrix.arch }} -- -p axis-origin --features device
+        run: cargo-acap-build --target ${{ matrix.arch }} -- -p multimux-edge --features device
 
       - name: Upload .eap
         uses: actions/upload-artifact@v4
         with:
-          name: axis-origin-fw${{ matrix.fw }}-${{ matrix.arch }}
+          name: multimux-edge-fw${{ matrix.fw }}-${{ matrix.arch }}
           path: target/acap/*.eap
           if-no-files-found: error
 
@@ -165,14 +165,14 @@ jobs:
       - name: Download every .eap built by the matrix
         uses: actions/download-artifact@v4
         with:
-          pattern: axis-origin-*
+          pattern: multimux-edge-*
           path: artifacts
 
       - name: Name each package by (firmware, arch) and checksum
         run: |
           set -euo pipefail
           mkdir -p eaps
-          for d in artifacts/axis-origin-*; do
+          for d in artifacts/multimux-edge-*; do
             fw="$(basename "$d" | cut -d- -f3)"
             for f in "$d"/*.eap; do
               base="$(basename "$f" .eap)"
@@ -199,7 +199,7 @@ jobs:
           VER="${GITHUB_REF_NAME#v}"
           if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release create "$GITHUB_REF_NAME" \
-              --title "axis-origin $VER"
+              --title "multimux-edge $VER"
           fi
           gh release upload "$GITHUB_REF_NAME" eaps/*.eap eaps/SHA256SUMS --clobber
           echo "::notice::attached $(ls eaps/*.eap | wc -l) .eap packages to $GITHUB_REF_NAME"
@@ -243,13 +243,13 @@ jobs:
       - name: Build rustdoc (host lib only, no device feature)
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc --locked --no-deps -p axis-origin
+        run: cargo doc --locked --no-deps -p multimux-edge
 
       - name: Assemble rustdoc into site/api
         run: |
           mkdir -p site/api
           cp -r target/doc/* site/api/
-          echo '<meta http-equiv="refresh" content="0; url=axis_origin/index.html">' > site/api/index.html
+          echo '<meta http-equiv="refresh" content="0; url=multimux_edge/index.html">' > site/api/index.html
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

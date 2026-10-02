@@ -1,6 +1,6 @@
 # Building
 
-`axis-origin` is **out of the main cargo workspace** (its own `Cargo.toml` +
+`multimux-edge` is **out of the main cargo workspace** (its own `Cargo.toml` +
 `rust-toolchain.toml`, pinned to Rust **1.97**). It depends on published
 `multimux 0.10` + `transmux 0.24` + `media-plane 0.4` + `broadcast-common 9.3`
 (crates.io — the latter two only under the `device` feature, see
@@ -39,9 +39,9 @@ docker run --rm -v "$PWD:/w" -w /w axisecp/acap-native-sdk:12.1.0-aarch64-ubuntu
   . "$HOME/.cargo/env"
   # set the sysroot / PKG_CONFIG / linker env per .github/workflows/ci.yml's "Discover SDK sysroot" + "Set cross-compile env" steps
   cargo install --locked --git https://github.com/AxisCommunications/acap-rs --rev 8e58acb8f0617253ad21fb71ac319fea19454a38 cargo-acap-build
-  ACAP_BUILD_IMPL=equivalent cargo-acap-build --target aarch64 -- -p axis-origin --features device
+  ACAP_BUILD_IMPL=equivalent cargo-acap-build --target aarch64 -- -p multimux-edge --features device
 '
-# -> target/acap/axis-origin_0_1_0_aarch64.eap
+# -> target/acap/multimux-edge_0_1_0_aarch64.eap
 ```
 
 For firmware 11, swap the image tag for `1.15.1-aarch64-ubuntu22.04` (or the

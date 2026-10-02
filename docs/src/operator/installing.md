@@ -1,7 +1,7 @@
 # Installing
 
 Grab the `.eap` for your camera's firmware and architecture from the
-[GitHub Releases page](https://github.com/fishloa/axis-origin/releases) —
+[GitHub Releases page](https://github.com/fishloa/axis-multimux-edge/releases) —
 see [Supported Devices](supported-devices.md) for which file matches your
 camera. Each release also ships a `SHA256SUMS` file to verify the download.
 
@@ -32,9 +32,9 @@ cargo-acap-sdk start   --host "$AXIS_DEVICE_IP" --user root --pass "$AXIS_DEVICE
 ## Verify the install
 
 1. The app shows **running** in the camera's Apps list.
-2. `curl -u <user>:<pw> https://<cam>/local/axisorigin/hls/cam/media.m3u8`
+2. `curl -u <user>:<pw> https://<cam>/local/multimuxedge/hls/cam/media.m3u8`
    returns an LL-HLS media playlist (look for `#EXT-X-PART`,
    `#EXT-X-PART-INF`, `#EXT-X-SERVER-CONTROL`).
-3. The admin settings page loads at `https://<cam>/local/axisorigin/`.
+3. The admin settings page loads at `https://<cam>/local/multimuxedge/`.
 
 If any of these fail, see [Troubleshooting](troubleshooting.md).
