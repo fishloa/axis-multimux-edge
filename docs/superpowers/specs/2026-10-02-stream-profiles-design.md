@@ -82,8 +82,7 @@ parameter (same store, same `GET`/`POST /admin/config`). New shape:
   "idle_timeout_secs": 30,
   "target_duration_secs": 4.0,
   "part_target_ms": 500,
-  "window_segments": 8,
-  "port": 2999
+  "window_segments": 8
 }
 ```
 
@@ -96,11 +95,14 @@ parameter (same store, same `GET`/`POST /admin/config`). New shape:
 - `max_encodes`: 1–8, default **2** (from the spike).
 - `idle_timeout_secs`: 5–600, default 30.
 - LL-HLS tuning stays global and applies to every stream.
-- `port` still needs a restart (it is the bind address); everything else is
-  live. The UI says so next to the field.
+- **No `port` setting.** The app always listens on `127.0.0.1:2999`, a code
+  constant that must equal `manifest.json`'s `reverseProxy` target (a host test
+  enforces this). A configurable port could only break the camera's proxy to
+  the app, and with it the admin page needed to undo the change. Every
+  setting applies live.
 
 **Migration:** a stored config in the old flat shape (no `streams` key) is
-read as `main` = its capture fields, `streams` = `[]`. The first save writes
+read as `main` = its capture fields, `streams` = `[]`. A stored `port` is ignored. The first save writes
 the new shape. Validation errors return 400 with a field-level message and
 leave the stored config unchanged.
 
@@ -191,15 +193,14 @@ and one content panel per section.
 - **Main preset.** Today's channel/resolution/fps/codec fields.
 - **Encoder.** `max_encodes`, `idle_timeout_secs`, plus the measured guidance
   ("2 full-rate encodes on ARTPEC-6; more slows every stream").
-- **LL-HLS.** Today's tuning fields and port (marked "restart required").
+- **LL-HLS.** Today's tuning fields.
 - **Status.** Live captures: name(s), resolved settings, state
   (idle/starting/running/error), fps, last error; encodes in use N/M.
   Polled every 5 s.
 - **About.** Version, links to docs/repo/API reference.
 - The player page gets a stream picker (default, main, each mapping).
 
-One Save button applies live and shows "Applied". Only the port field says
-"applies on restart". No inline `style=""` attributes; all styling lives in
+One Save button applies live and shows "Applied". No inline `style=""` attributes; all styling lives in
 the page's stylesheet.
 
 ## API and OpenAPI
@@ -237,6 +238,7 @@ today.
 **Host (CI `host` job):**
 - Config: validation (names, reserved words, default must exist, ranges),
   old-shape migration, serde round trip.
+- Port constant equals the `reverseProxy` target port in `manifest.json`.
 - Profile parser: every key in the table, odd inputs, real strings from
   the P1448-LE.
 - Registry with a fake capture: on-demand start, idle stop, shared encode
