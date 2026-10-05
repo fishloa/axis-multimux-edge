@@ -95,6 +95,7 @@
 
 use std::collections::VecDeque;
 use std::convert::Infallible;
+use std::sync::{Mutex, PoisonError};
 
 use broadcast_common::{Demand, Stage, Timestamp};
 use media_plane::ingress::{IngestSession, ProgramId, SessionEvent};
@@ -161,7 +162,11 @@ struct PendingAu {
 /// [`feed`](Stage::feed) call blocks (see the module doc) on
 /// [`RunningStream::next_buffer`].
 pub struct VdoIngestSession {
-    running: RunningStream,
+    /// In a `Mutex` only to make the session `Sync`: multimux 0.11's async
+    /// `advance_route` holds `&IngestDriver<Self>` across an `.await`, and
+    /// `vdo::RunningStream` (a raw C handle) is `Send` but not `Sync`. Never
+    /// actually locked: the only access is `Mutex::get_mut` from `&mut self`.
+    running: Mutex<RunningStream>,
     track_id: u32,
     codec: Codec,
     clock_rate: u32,
@@ -226,7 +231,7 @@ impl VdoIngestSession {
         let spec = convert::track_spec(codec, &params, TRACK_ID, CLOCK_RATE)?;
 
         Ok(Self {
-            running,
+            running: Mutex::new(running),
             track_id: TRACK_ID,
             codec,
             clock_rate: CLOCK_RATE,
@@ -244,7 +249,11 @@ impl VdoIngestSession {
     /// [`Sample`].
     fn read_next_sample(&mut self) -> Result<Sample> {
         loop {
-            let buf = self.running.next_buffer()?;
+            let buf = self
+                .running
+                .get_mut()
+                .unwrap_or_else(PoisonError::into_inner)
+                .next_buffer()?;
             let ft = buf.frame_type();
             if !is_picture(self.codec, ft) {
                 // non-key pictures / SEI while live: dropped, exactly as the
