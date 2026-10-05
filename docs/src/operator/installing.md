@@ -16,7 +16,7 @@ Install the installer tool once:
 
 ```bash
 cargo install --locked --git https://github.com/AxisCommunications/acap-rs \
-  --rev 8e58acb8f0617253ad21fb71ac319fea19454a38 cargo-acap-sdk
+  --rev 5eed2e27fcb2a83e4d42ef71ccd49039949e9cca cargo-acap-sdk
 ```
 
 Then, with the `.eap` file downloaded locally:
