@@ -5,11 +5,10 @@ here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-05
+
 ### Breaking
 
-- **Dependencies bumped:** multimux 0.11, transmux 0.25, media-plane 0.5,
-  broadcast-common 9.4 and axum 0.8 (required by multimux 0.11), plus
-  every other dependency to its latest compatible version.
 - **Renamed to Multimux Edge.** The ACAP `appName` is now `multimuxedge`
   (was `axisorigin`), with display name "Multimux Edge"; the crate and binary
   are `multimux-edge`; the repository moved to
@@ -20,6 +19,14 @@ here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
     `appName`, so the new app starts on defaults.
   - URLs move from `/local/axisorigin/...` to `/local/multimuxedge/...`
     (stream: `/local/multimuxedge/hls/cam/media.m3u8`).
+
+### Changed
+
+- **Dependencies bumped:** multimux 0.11, transmux 0.25, media-plane 0.5,
+  broadcast-common 9.4 and axum 0.8 (required by multimux 0.11), plus
+  every other dependency to its latest compatible version. acap-rs
+  re-pinned to the fork rebased on upstream `5eed2e2`; firmware-12 builds
+  use ACAP Native SDK 12.11.0.
 
 ### Fixed
 

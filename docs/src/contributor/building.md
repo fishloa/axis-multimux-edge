@@ -41,7 +41,7 @@ docker run --rm -v "$PWD:/w" -w /w axisecp/acap-native-sdk:12.11.0-aarch64-ubunt
   cargo install --locked --git https://github.com/AxisCommunications/acap-rs --rev 5eed2e27fcb2a83e4d42ef71ccd49039949e9cca cargo-acap-build
   ACAP_BUILD_IMPL=equivalent cargo-acap-build --arch aarch64 -- -p multimux-edge --features device
 '
-# -> target/acap/multimux-edge_0_1_0_aarch64.eap
+# -> target/acap/Multimux_Edge_0_2_0_aarch64.eap
 ```
 
 For firmware 11, swap the image tag for `1.15.1-aarch64-ubuntu22.04` (or the
