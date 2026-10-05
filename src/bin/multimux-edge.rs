@@ -54,6 +54,7 @@ use multimux::{Backoff, MultimuxError, RouteHandle};
 use multimux_edge::admin::{self, AxParameterStore, ConfigStore, StatusHandle};
 use multimux_edge::convert::Codec;
 use multimux_edge::vdo_source::VdoIngestSession;
+use tokio_util::sync::CancellationToken;
 
 /// The single served stream's name in LL-HLS URLs
 /// (`…/hls/<STREAM_NAME>/media.m3u8`) — this app captures exactly one VDO
@@ -173,9 +174,8 @@ async fn main() {
 /// with its own `current_thread` tokio runtime (see the module doc's
 /// "Threading" section): [`multimux::supervise_driver`] driving
 /// [`run_vdo_capture`], forever, retrying with backoff on failure. Never
-/// observes shutdown (`_keep_alive` is held for the thread's whole lifetime
-/// so the paired `watch::Receiver` never errors) — this app has no graceful
-/// shutdown concept today, matching the pre-port behaviour (the process was
+/// cancelled (the `CancellationToken` is never triggered) — this app has no
+/// graceful shutdown concept today, matching the pre-port behaviour (the process was
 /// simply killed to stop it).
 fn spawn_capture_pipeline(
     cfg: &admin::Config,
@@ -199,7 +199,8 @@ fn spawn_capture_pipeline(
             .build()
             .expect("build current-thread runtime for the VDO capture pipeline");
         rt.block_on(async move {
-            let (_keep_alive, shutdown_rx) = tokio::sync::watch::channel(false);
+            // Never cancelled: this app has no graceful shutdown (see above).
+            let cancel = CancellationToken::new();
             supervise_driver_forever(
                 codec,
                 channel,
@@ -209,7 +210,7 @@ fn spawn_capture_pipeline(
                 window_segments,
                 status,
                 route_handle,
-                shutdown_rx,
+                cancel,
             )
             .await;
         });
@@ -230,7 +231,7 @@ async fn supervise_driver_forever(
     window_segments: usize,
     status: StatusHandle,
     route_handle: Arc<RouteHandle>,
-    shutdown_rx: tokio::sync::watch::Receiver<bool>,
+    cancel: CancellationToken,
 ) {
     multimux::supervise_driver(
         move |route_handle| {
@@ -252,7 +253,7 @@ async fn supervise_driver_forever(
         route_handle,
         Backoff::production_default(),
         STREAM_NAME.to_string(),
-        shutdown_rx,
+        cancel,
     )
     .await;
 }
@@ -312,7 +313,7 @@ async fn run_vdo_capture(
     loop {
         let now = Timestamp::from_instant(start, Instant::now());
         driver.feed((), now);
-        advance_route(&driver, route_handle, &mut progress);
+        advance_route(&driver, route_handle, &mut progress).await;
         // Issue #955: `StatusHandle` was never touched by the pipeline, so
         // `/admin/status` reported `current_segment`/`current_part`/`frames`
         // as permanent zeros while segments were being served correctly —
