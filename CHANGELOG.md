@@ -23,6 +23,11 @@ here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ### Fixed
 
+- **Fresh installs no longer start with a broken config.** libaxparameter
+  truncated the first-run default (written via `add`) to `{`, so a new
+  install reported `config load: stored config is not valid JSON` until the
+  first save. The default is now written with `set`, and a stored `{` or
+  empty value is treated as "nothing stored yet".
 - **The config store has never worked on any camera** (issue #955, blocks
   #954's H.265 hardware verification). `AxParameterStore::store` called
   `axparameter::Parameter::set("Config", …)` on a parameter that was never
