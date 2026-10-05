@@ -156,6 +156,21 @@ impl LoadOutcome {
     }
 }
 
+/// Interpret the raw stored config string. Empty, or the lone `{` that
+/// libaxparameter's truncated first-run `add` used to leave behind, means
+/// nothing real was ever stored ([`LoadOutcome::Unset`]), not a broken
+/// backend; anything else must parse.
+#[cfg_attr(not(feature = "device"), allow(dead_code))] // only the device store calls it
+pub(crate) fn parse_stored(s: &str) -> LoadOutcome {
+    match s.trim() {
+        "" | "{" => LoadOutcome::Unset,
+        json => match serde_json::from_str(json) {
+            Ok(cfg) => LoadOutcome::Stored(cfg),
+            Err(e) => LoadOutcome::Broken(format!("stored config is not valid JSON: {e}")),
+        },
+    }
+}
+
 /// Loads and persists [`Config`]. Host builds use [`DefaultStore`]; device
 /// builds use `#[cfg(feature = "device")]` `AxParameterStore`.
 pub trait ConfigStore: Send + Sync + 'static {
@@ -263,14 +278,21 @@ impl AxParameterStore {
     /// vendored `axparameter_example` app's own `add`-then-ignore-ParamAdded
     /// pattern — so that specific error is swallowed; any other error means
     /// the backend itself is broken and is propagated.
+    ///
+    /// The parameter is added with an empty value and the real default is
+    /// then written with `set`: libaxparameter truncates an `add` initial
+    /// value at its first `"`, so adding the JSON directly stored just `{`
+    /// (observed on AXIS OS 11.11, 2026-10-02). `set` escapes correctly.
     fn ensure_parameter(&self) -> crate::Result<()> {
         let initial = serde_json::to_string(&Config::default())
             .map_err(|e| crate::OriginError::Config(format!("config serialize: {e}")))?;
         let Some(inner) = self.inner.as_ref() else {
             return Ok(());
         };
-        match inner.add(Self::PARAM_NAME, None, initial) {
-            Ok(()) => Ok(()),
+        match inner.add(Self::PARAM_NAME, None, String::new()) {
+            Ok(()) => inner
+                .set(Self::PARAM_NAME, initial, true)
+                .map_err(|e| crate::OriginError::Config(format!("axparameter set initial: {e}"))),
             Err(e)
                 if e.matches::<axparameter::error::ParameterError>(
                     axparameter::error::ParameterError::ParamAdded,
@@ -287,13 +309,12 @@ impl AxParameterStore {
 impl ConfigStore for AxParameterStore {
     fn load(&self) -> LoadOutcome {
         // `ensure_parameter` (run once in `new()`) guarantees the parameter
-        // exists with a JSON value by the time `load` can ever be called on
-        // a live `AxParameterStore` — so a `get` failure here means the
-        // backend is broken (dbus/file-level failure), never "nothing
-        // stored yet". Keeping `Unset` reachable only through `DefaultStore`
-        // is deliberate: it is the honest description of *that* store,
-        // whereas an `AxParameterStore` `get` error is a real fault to
-        // surface, not a design-accepted absence.
+        // exists by the time `load` can be called on a live
+        // `AxParameterStore`, so a `get` failure here means the backend is
+        // broken (dbus/file-level failure), never "nothing stored yet". An
+        // empty or truncated (`{`) stored value is `Unset` (see
+        // `parse_stored`): a crash between `add` and `set`, or a camera
+        // installed before the first-run truncation fix.
         let Some(inner) = self.inner.as_ref() else {
             return LoadOutcome::Broken(
                 self.open_error
@@ -302,10 +323,7 @@ impl ConfigStore for AxParameterStore {
             );
         };
         match inner.get::<String>(Self::PARAM_NAME) {
-            Ok(s) => match serde_json::from_str(&s) {
-                Ok(cfg) => LoadOutcome::Stored(cfg),
-                Err(e) => LoadOutcome::Broken(format!("stored config is not valid JSON: {e}")),
-            },
+            Ok(s) => parse_stored(&s),
             Err(e) => LoadOutcome::Broken(format!("axparameter get: {e}")),
         }
     }
@@ -624,6 +642,27 @@ mod tests {
         assert_eq!(value["current_part"], serde_json::json!(2));
         assert_eq!(value["frames"], serde_json::json!(42));
         assert_eq!(value["last_error"], serde_json::json!("boom"));
+    }
+
+    #[test]
+    fn parse_stored_treats_empty_and_truncated_as_unset() {
+        assert_eq!(parse_stored(""), LoadOutcome::Unset);
+        assert_eq!(parse_stored("  "), LoadOutcome::Unset);
+        assert_eq!(parse_stored("{"), LoadOutcome::Unset);
+    }
+
+    #[test]
+    fn parse_stored_parses_real_config_and_flags_garbage() {
+        let cfg = Config {
+            codec: "h265".to_string(),
+            ..Config::default()
+        };
+        let s = serde_json::to_string(&cfg).unwrap();
+        assert_eq!(parse_stored(&s), LoadOutcome::Stored(cfg));
+        assert!(matches!(
+            parse_stored("{\"channel\":"),
+            LoadOutcome::Broken(_)
+        ));
     }
 
     #[test]
