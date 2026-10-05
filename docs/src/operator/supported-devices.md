@@ -8,8 +8,8 @@ architecture) pair:
 |---|---|---|---|
 | 11 | 1.15.1 | aarch64 | `fw11_aarch64` |
 | 11 | 1.15.1 | armv7hf | `fw11_armv7hf` |
-| 12 | 12.1.0 | aarch64 | `fw12_aarch64` |
-| 12 | 12.1.0 | armv7hf | `fw12_armv7hf` |
+| 12 | 12.11.0 | aarch64 | `fw12_aarch64` |
+| 12 | 12.11.0 | armv7hf | `fw12_armv7hf` |
 
 Match your camera's CPU architecture and installed firmware major version
 to pick the right file from a [release](https://github.com/fishloa/axis-multimux-edge/releases).

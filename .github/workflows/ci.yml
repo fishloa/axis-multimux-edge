@@ -35,8 +35,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { fw: "12", sdk: "12.1.0", ubuntu: "24.04", arch: aarch64 }
-          - { fw: "12", sdk: "12.1.0", ubuntu: "24.04", arch: armv7hf }
+          - { fw: "12", sdk: "12.11.0", ubuntu: "24.04", arch: aarch64 }
+          - { fw: "12", sdk: "12.11.0", ubuntu: "24.04", arch: armv7hf }
           - { fw: "11", sdk: "1.15.1", ubuntu: "22.04", arch: aarch64 }
           - { fw: "11", sdk: "1.15.1", ubuntu: "22.04", arch: armv7hf }
     steps:
@@ -137,12 +137,12 @@ jobs:
       - name: Install cargo-acap-build
         run: |
           cargo install --locked --git https://github.com/AxisCommunications/acap-rs \
-            --rev 8e58acb8f0617253ad21fb71ac319fea19454a38 cargo-acap-build
+            --rev 5eed2e27fcb2a83e4d42ef71ccd49039949e9cca cargo-acap-build
 
       - name: Build .eap (device feature)
         env:
           ACAP_BUILD_IMPL: equivalent
-        run: cargo-acap-build --target ${{ matrix.arch }} -- -p multimux-edge --features device
+        run: cargo-acap-build --arch ${{ matrix.arch }} -- -p multimux-edge --features device
 
       - name: Upload .eap
         uses: actions/upload-artifact@v4
