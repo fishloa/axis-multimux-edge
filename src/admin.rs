@@ -414,6 +414,8 @@ pub(crate) struct AdminState<S: ConfigStore> {
     store: Arc<S>,
     app_status: StatusHandle,
     registry: Arc<Registry>,
+    /// Serialises store-then-apply so concurrent POSTs cannot interleave.
+    apply_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 // Manual `Clone` so cloning never requires `S: Clone`.
@@ -423,6 +425,7 @@ impl<S: ConfigStore> Clone for AdminState<S> {
             store: Arc::clone(&self.store),
             app_status: self.app_status.clone(),
             registry: Arc::clone(&self.registry),
+            apply_lock: Arc::clone(&self.apply_lock),
         }
     }
 }
@@ -438,6 +441,7 @@ pub fn admin_router<S: ConfigStore>(
         store,
         app_status,
         registry,
+        apply_lock: Arc::new(tokio::sync::Mutex::new(())),
     };
     Router::new()
         .route("/admin/config", get(get_config::<S>).post(post_config::<S>))
@@ -448,7 +452,7 @@ pub fn admin_router<S: ConfigStore>(
 }
 
 /// Current configuration.
-#[utoipa::path(get, path = "/admin/config", responses((status = 200, body = Config)))]
+#[utoipa::path(get, path = "/admin/config", tag = "admin", responses((status = 200, description = "Current configuration", body = Config)))]
 pub(crate) async fn get_config<S: ConfigStore>(State(state): State<AdminState<S>>) -> Json<Config> {
     let outcome = state.store.load();
     // A broken backend is real evidence (issue #955): surface it through
@@ -462,9 +466,9 @@ pub(crate) async fn get_config<S: ConfigStore>(State(state): State<AdminState<S>
 }
 
 /// Validate, store and apply a configuration. Applies immediately.
-#[utoipa::path(post, path = "/admin/config", request_body = Config, responses(
-    (status = 200, body = Applied),
-    (status = 400, body = ValidationErrors),
+#[utoipa::path(post, path = "/admin/config", tag = "admin", request_body = Config, responses(
+    (status = 200, description = "Stored and applied", body = Applied),
+    (status = 400, description = "Validation failed; nothing stored or applied", body = ValidationErrors),
     (status = 500, description = "config store failed", body = String),
 ))]
 pub(crate) async fn post_config<S: ConfigStore>(
@@ -474,6 +478,7 @@ pub(crate) async fn post_config<S: ConfigStore>(
     if let Err(errors) = cfg.validate() {
         return (StatusCode::BAD_REQUEST, Json(ValidationErrors { errors })).into_response();
     }
+    let _guard = state.apply_lock.lock().await;
     if let Err(e) = state.store.store(&cfg) {
         return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
     }
@@ -485,7 +490,7 @@ pub(crate) async fn post_config<S: ConfigStore>(
 }
 
 /// Encoder usage and every running capture.
-#[utoipa::path(get, path = "/admin/status", responses((status = 200, body = AdminStatus)))]
+#[utoipa::path(get, path = "/admin/status", tag = "admin", responses((status = 200, description = "Encoder usage and captures", body = AdminStatus)))]
 pub(crate) async fn get_status<S: ConfigStore>(
     State(state): State<AdminState<S>>,
 ) -> Json<AdminStatus> {
@@ -496,7 +501,7 @@ pub(crate) async fn get_status<S: ConfigStore>(
 }
 
 /// The camera's stream profiles and what this app would capture for each.
-#[utoipa::path(get, path = "/admin/profiles", responses((status = 200, body = ProfilesResponse)))]
+#[utoipa::path(get, path = "/admin/profiles", tag = "admin", responses((status = 200, description = "Camera stream profiles", body = ProfilesResponse)))]
 pub(crate) async fn get_profiles<S: ConfigStore>(
     State(state): State<AdminState<S>>,
 ) -> Json<ProfilesResponse> {
@@ -530,7 +535,7 @@ pub(crate) async fn get_profiles<S: ConfigStore>(
 }
 
 /// This API's OpenAPI 3 description.
-#[utoipa::path(get, path = "/admin/openapi.json", responses((status = 200, description = "OpenAPI document")))]
+#[utoipa::path(get, path = "/admin/openapi.json", tag = "admin", responses((status = 200, description = "OpenAPI document", content_type = "application/json")))]
 pub(crate) async fn get_openapi() -> Response {
     (
         [(axum::http::header::CONTENT_TYPE, "application/json")],
@@ -670,9 +675,44 @@ mod tests {
             .unwrap();
         assert_eq!(r.status(), StatusCode::OK);
         let v = body_json(r).await;
-        for p in ["/admin/config", "/admin/status", "/admin/profiles"] {
+        for p in [
+            "/admin/config",
+            "/admin/status",
+            "/admin/profiles",
+            "/admin/openapi.json",
+        ] {
             assert!(v["paths"][p].is_object(), "missing {p}");
         }
+        assert_eq!(v["servers"][0]["url"], "/local/multimuxedge");
+    }
+
+    struct FailingStore;
+
+    impl ConfigStore for FailingStore {
+        fn load(&self) -> LoadOutcome {
+            LoadOutcome::Unset
+        }
+
+        fn store(&self, _c: &Config) -> crate::Result<()> {
+            Err(crate::OriginError::Config("disk full".into()))
+        }
+    }
+
+    #[tokio::test]
+    async fn post_config_store_failure_returns_500_and_does_not_apply() {
+        let (_, reg) = router_with(&[]);
+        let app = admin_router(Arc::new(FailingStore), StatusHandle::new(), reg.clone());
+        let cfg = Config {
+            streams: vec![crate::config::StreamMapping {
+                name: "med".into(),
+                profile: "ACC_Medium".into(),
+            }],
+            ..Config::default()
+        };
+        let before = reg.config();
+        let r = post_json(app, "/admin/config", &serde_json::to_value(&cfg).unwrap()).await;
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(reg.config(), before);
     }
 
     async fn body_json(response: axum::response::Response) -> serde_json::Value {
