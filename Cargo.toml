@@ -38,10 +38,10 @@ tower     = { version = "0.5", features = ["util"] }
 # (upstream only builds against the fw12 VDO API). StreamBuilder::gop_length, the
 # fork's other former patch, is upstream now (#249). Back to upstream once the
 # fw11 fix lands there.
-vdo          = { git = "https://github.com/fishloa/acap-rs", rev = "b1f674c7b5fdde8e171911c591cf1ecb0b3296b6", optional = true }
-axparameter  = { git = "https://github.com/fishloa/acap-rs", rev = "b1f674c7b5fdde8e171911c591cf1ecb0b3296b6", optional = true }
-acap-logging = { git = "https://github.com/fishloa/acap-rs", rev = "b1f674c7b5fdde8e171911c591cf1ecb0b3296b6", optional = true }
-acap-vapix   = { git = "https://github.com/fishloa/acap-rs", rev = "b1f674c7b5fdde8e171911c591cf1ecb0b3296b6", optional = true }
+vdo          = { git = "https://github.com/fishloa/acap-rs", rev = "8f5f3f4d7cc35f5b3bd84f4a18af44f2b9b4d17b", optional = true }
+axparameter  = { git = "https://github.com/fishloa/acap-rs", rev = "8f5f3f4d7cc35f5b3bd84f4a18af44f2b9b4d17b", optional = true }
+acap-logging = { git = "https://github.com/fishloa/acap-rs", rev = "8f5f3f4d7cc35f5b3bd84f4a18af44f2b9b4d17b", optional = true }
+acap-vapix   = { git = "https://github.com/fishloa/acap-rs", rev = "8f5f3f4d7cc35f5b3bd84f4a18af44f2b9b4d17b", optional = true }
 # `VdoIngestSession` (src/vdo_source.rs, device-gated) implements
 # `media_plane::ingress`'s `Stage`/`IngestSession` traits directly — multimux
 # 0.5 (issue #805) deleted `multimux::pipeline::{run_pipeline, SampleSource}`

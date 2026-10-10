@@ -123,6 +123,11 @@ const CLOCK_RATE: u32 = 90_000;
 /// How often `scan_for_param_sets` logs that it is still waiting for a key frame.
 const SCAN_WARN_INTERVAL: Duration = Duration::from_secs(10);
 
+/// How often `scan_for_param_sets` re-asks VDO for a key frame while waiting.
+/// The first request goes out before the first buffer read; repeats cover a
+/// request that lands on frames already queued ahead of it.
+const FORCE_KEY_FRAME_INTERVAL: Duration = Duration::from_secs(2);
+
 /// The first IDR access unit found while collecting parameter sets, held onto
 /// so it can be delivered as the first real sample instead of being dropped.
 ///
@@ -343,8 +348,19 @@ fn scan_for_param_sets(
 
     let started = Instant::now();
     let mut last_warn = started;
+    let mut last_force: Option<Instant> = None;
     let mut seen: usize = 0;
     loop {
+        // Ask for a key frame now rather than waiting out the camera's GOP.
+        // Best effort: on failure the scan still waits for a natural one.
+        if last_force.is_none_or(|t| t.elapsed() >= FORCE_KEY_FRAME_INTERVAL) {
+            last_force = Some(Instant::now());
+            if let Err(e) = running.force_key_frame() {
+                log::warn!(
+                    "vdo scan: force_key_frame failed, waiting for a natural key frame: {e}"
+                );
+            }
+        }
         let buf = running.next_buffer()?;
         let i = seen;
         seen += 1;
