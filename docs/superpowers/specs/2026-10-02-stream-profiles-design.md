@@ -1,7 +1,7 @@
 # Stream profiles — design
 
-Date: 2026-10-02 · Status: draft for review · Builds on: the Multimux Edge
-rename (PR #1)
+Date: 2026-10-02 · Status: draft for review · Builds on: v0.2.0
+(Multimux Edge rename, multimux 0.11, axum 0.8)
 
 ## Goal
 
@@ -106,10 +106,8 @@ read as `main` = its capture fields, `streams` = `[]`. A stored `port` is ignore
 the new shape. Validation errors return 400 with a field-level message and
 leave the stored config unchanged.
 
-**First-run truncation bug fix:** the default config written by `add` on
-first run is truncated by libaxparameter to `{`. The store will create the
-parameter and then always write the value with `set` (the path that escapes
-correctly, verified on device).
+**First-run truncation bug fix:** shipped separately in v0.2.0 (`add` empty,
+then `set` the default; a stored `{` or empty value reads as unset).
 
 ## URLs
 
@@ -164,7 +162,7 @@ captures by resolved settings, not by name.
 
 ## Profile → capture settings
 
-The vdo builder (acap-rs fork, rev `3c513f9`) supports: codec, channel,
+The vdo builder (acap-rs fork, rev `b1f674c`) supports: codec, channel,
 resolution, framerate, GOP length. Mapping:
 
 | Profile key | Capture setting |
@@ -215,7 +213,7 @@ the page's stylesheet.
 
 Annotate types with `utoipa::ToSchema` and handlers with `#[utoipa::path]`.
 Assemble with `#[derive(OpenApi)]`. utoipa 6.x, framework-agnostic core only
-(no `utoipa-axum`; we stay on axum 0.7). The docs site gets an "API
+(no `utoipa-axum`; axum 0.8, as multimux 0.11 requires). The docs site gets an "API
 reference" page that renders the spec, and CI writes `openapi.json` into the
 site build via a small host-built binary or test, so docs never drift.
 All endpoints stay behind the camera's `admin` reverse-proxy access level, as
