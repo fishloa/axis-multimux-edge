@@ -1,0 +1,497 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Multimux Edge admin API",
+    "description": "Configure stream mappings and inspect captures. All paths are under /local/multimuxedge and require the camera's admin access level.",
+    "license": {
+      "name": "MIT OR Apache-2.0",
+      "identifier": "MIT OR Apache-2.0"
+    },
+    "version": "0.2.0"
+  },
+  "servers": [
+    {
+      "url": "/local/multimuxedge"
+    }
+  ],
+  "paths": {
+    "/admin/config": {
+      "get": {
+        "tags": [
+          "crate::admin"
+        ],
+        "summary": "Current configuration.",
+        "operationId": "get_config",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Config"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "crate::admin"
+        ],
+        "summary": "Validate, store and apply a configuration. Applies immediately.",
+        "operationId": "post_config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Config"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Applied"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "config store failed",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/openapi.json": {
+      "get": {
+        "tags": [
+          "crate::admin"
+        ],
+        "summary": "This API's OpenAPI 3 description.",
+        "operationId": "get_openapi",
+        "responses": {
+          "200": {
+            "description": "OpenAPI document"
+          }
+        }
+      }
+    },
+    "/admin/profiles": {
+      "get": {
+        "tags": [
+          "crate::admin"
+        ],
+        "summary": "The camera's stream profiles and what this app would capture for each.",
+        "operationId": "get_profiles",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfilesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/status": {
+      "get": {
+        "tags": [
+          "crate::admin"
+        ],
+        "summary": "Encoder usage and every running capture.",
+        "operationId": "get_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AdminStatus": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/RegistryStatus"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "last_error": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The config-backend or pipeline error, if any."
+              }
+            }
+          }
+        ],
+        "description": "Response of `GET /admin/status`."
+      },
+      "Applied": {
+        "type": "object",
+        "description": "200 body of `POST /admin/config`.",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Always `applied`."
+          }
+        }
+      },
+      "Config": {
+        "type": "object",
+        "description": "The whole app configuration.",
+        "required": [
+          "main",
+          "streams",
+          "max_encodes",
+          "idle_timeout_secs",
+          "target_duration_secs",
+          "part_target_ms",
+          "window_segments"
+        ],
+        "properties": {
+          "default_stream": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name served by the bare `/hls/media.m3u8`; `null` = `main`."
+          },
+          "idle_timeout_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds without requests before a stream's capture stops (5–600).",
+            "minimum": 0
+          },
+          "main": {
+            "$ref": "#/components/schemas/MainPreset",
+            "description": "Built-in capture preset."
+          },
+          "max_encodes": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Maximum concurrent distinct encodes this app may hold (1–8).",
+            "minimum": 0
+          },
+          "part_target_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "LL-HLS target part duration, milliseconds.",
+            "minimum": 0
+          },
+          "streams": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StreamMapping"
+            },
+            "description": "Name → camera profile mappings."
+          },
+          "target_duration_secs": {
+            "type": "number",
+            "format": "double",
+            "description": "LL-HLS target segment duration, seconds."
+          },
+          "window_segments": {
+            "type": "integer",
+            "description": "Segments kept in the media playlist window.",
+            "minimum": 0
+          }
+        }
+      },
+      "EncodeUsage": {
+        "type": "object",
+        "required": [
+          "in_use",
+          "max"
+        ],
+        "properties": {
+          "in_use": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "max": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "FieldError": {
+        "type": "object",
+        "description": "One validation failure, addressed by a JSON-path-like field name.",
+        "required": [
+          "field",
+          "message"
+        ],
+        "properties": {
+          "field": {
+            "type": "string",
+            "description": "e.g. `streams[1].name`, `max_encodes`."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable reason."
+          }
+        }
+      },
+      "MainPreset": {
+        "type": "object",
+        "description": "Built-in capture preset, served at `/hls/main/…` and used when no default\nstream is set. Also supplies values a camera profile leaves out.",
+        "required": [
+          "channel",
+          "width",
+          "height",
+          "framerate",
+          "codec"
+        ],
+        "properties": {
+          "channel": {
+            "type": "integer",
+            "format": "int32",
+            "description": "VDO channel index.",
+            "minimum": 0
+          },
+          "codec": {
+            "type": "string",
+            "description": "`\"h264\"` or `\"h265\"`."
+          },
+          "framerate": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Frame rate, fps (0 = camera default).",
+            "minimum": 0
+          },
+          "height": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Capture height, pixels.",
+            "minimum": 0
+          },
+          "width": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Capture width, pixels.",
+            "minimum": 0
+          }
+        }
+      },
+      "ProfileView": {
+        "type": "object",
+        "description": "One camera stream profile and what this app would capture for it.",
+        "required": [
+          "name",
+          "description",
+          "parameters",
+          "ignored_keys"
+        ],
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the profile cannot be captured, if so."
+          },
+          "ignored_keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "type": "string"
+          },
+          "parameters": {
+            "type": "string",
+            "description": "Raw `key=value&...` parameter string of the camera profile."
+          },
+          "settings": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Human-readable capture settings, when the profile is usable."
+          }
+        }
+      },
+      "ProfilesResponse": {
+        "type": "object",
+        "description": "Response of `GET /admin/profiles`.",
+        "required": [
+          "profiles"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Set when the camera's profile list could not be read."
+          },
+          "profiles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProfileView"
+            }
+          }
+        }
+      },
+      "RegistryStatus": {
+        "type": "object",
+        "required": [
+          "encodes",
+          "streams"
+        ],
+        "properties": {
+          "encodes": {
+            "$ref": "#/components/schemas/EncodeUsage"
+          },
+          "streams": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StreamStatus"
+            }
+          }
+        }
+      },
+      "StreamMapping": {
+        "type": "object",
+        "description": "One URL name mapped to one camera stream profile.",
+        "required": [
+          "name",
+          "profile"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "URL segment: `/hls/<name>/media.m3u8`."
+          },
+          "profile": {
+            "type": "string",
+            "description": "Camera stream profile name, exactly as the camera lists it."
+          }
+        }
+      },
+      "StreamStatus": {
+        "type": "object",
+        "required": [
+          "names",
+          "settings",
+          "state",
+          "running",
+          "current_segment",
+          "current_part",
+          "frames",
+          "fps",
+          "idle_secs"
+        ],
+        "properties": {
+          "current_part": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "current_segment": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "fps": {
+            "type": "number",
+            "format": "double",
+            "description": "Average fps since the capture started."
+          },
+          "frames": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "idle_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds since the last request.",
+            "minimum": 0
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Names currently served by this capture."
+          },
+          "running": {
+            "type": "boolean"
+          },
+          "settings": {
+            "type": "string",
+            "description": "e.g. `h264 1280x720@25 ch1`."
+          },
+          "state": {
+            "type": "string",
+            "description": "`starting`, `running` or `error`."
+          }
+        }
+      },
+      "ValidationErrors": {
+        "type": "object",
+        "description": "400 body of `POST /admin/config`.",
+        "required": [
+          "errors"
+        ],
+        "properties": {
+          "errors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FieldError"
+            }
+          }
+        }
+      }
+    }
+  }
+}
