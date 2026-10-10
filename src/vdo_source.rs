@@ -184,8 +184,8 @@ pub struct VdoIngestSession {
 }
 
 impl VdoIngestSession {
-    /// Open VDO `channel` at `width`x`height`/`framerate`, encoding `codec`,
-    /// start it, and scan forward for the in-band parameter sets needed to
+    /// Open the VDO channel described by `settings` (channel, size, framerate,
+    /// codec, optional GOP length), start it, and scan forward for the in-band parameter sets needed to
     /// build the track's `avcC`/`hvcC`.
     ///
     /// # Errors
@@ -195,13 +195,15 @@ impl VdoIngestSession {
     /// within [`PARAM_SET_SCAN_LIMIT`] buffers, or the parameter sets found
     /// don't decode into a valid `TrackSpec` (propagated from
     /// [`convert::track_spec`]).
-    pub fn new(
-        codec: Codec,
-        channel: u32,
-        width: u32,
-        height: u32,
-        framerate: u32,
-    ) -> Result<Self> {
+    pub fn new(settings: &crate::profile::CaptureSettings) -> Result<Self> {
+        let crate::profile::CaptureSettings {
+            codec,
+            channel,
+            width,
+            height,
+            framerate,
+            gop_length,
+        } = *settings;
         let format = match codec {
             Codec::H264 => VdoFormat::VDO_FORMAT_H264,
             Codec::H265 => VdoFormat::VDO_FORMAT_H265,
@@ -215,7 +217,7 @@ impl VdoIngestSession {
         // ARTPEC-6 / firmware 11, #669). Falls back to 30 if the caller left
         // framerate at 0 (camera default) rather than forcing a key frame every
         // frame.
-        let gop_length = if framerate > 0 { framerate } else { 30 };
+        let gop_length = gop_length.unwrap_or(if framerate > 0 { framerate } else { 30 });
 
         let stream = StreamBuilder::new()
             .channel(channel)
