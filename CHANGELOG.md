@@ -5,6 +5,29 @@ here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Added
+
+- **Stream profiles.** Map URL names to the camera's own stream profiles
+  (`hls/medium/media.m3u8` → `ACC_Medium`) on the admin page or via
+  `POST /admin/config`. Streams start on the first request, stop when idle,
+  and share one encode when they resolve to the same settings. A
+  configurable encode cap (default 2) answers 503 instead of slowing every
+  stream down.
+- `GET /admin/profiles` and an OpenAPI description at
+  `GET /admin/openapi.json`; API reference on the docs site.
+- Redesigned admin page (Multimux Edge look, live status, light/dark).
+
+### Changed
+
+- **Breaking:** config v2. Capture fields move under `main`; older stored
+  configs are migrated on load. `port` is removed (the app always listens
+  on 2999, the manifest's reverse-proxy target).
+- **Breaking:** the stream URL `hls/cam/media.m3u8` is now `hls/main/…`
+  (or the bare `hls/media.m3u8`, which redirects to the default stream).
+- **Breaking:** `GET /admin/status` now reports `encodes` and a `streams`
+  list; the single-pipeline fields moved into each stream entry.
+- Config changes apply immediately; no restart.
+
 ## [0.2.0] - 2026-10-05
 
 ### Breaking

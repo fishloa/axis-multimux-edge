@@ -17,6 +17,18 @@ trigger.
 
 ## Cutting a release
 
+Before cutting a release, update the OpenAPI snapshot if the crate version
+changed. The snapshot embeds the crate version, so after bumping the version
+in `Cargo.toml`, regenerate and commit it:
+
+```bash
+UPDATE_OPENAPI=1 cargo test --locked --test openapi_snapshot
+git add docs/src/api/openapi.json
+git commit -m "openapi.json: update snapshot to <version>"
+```
+
+Then tag and push the release:
+
 ```bash
 git tag vX.Y.Z
 git push origin vX.Y.Z
