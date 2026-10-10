@@ -125,7 +125,6 @@ async fn main() {
     let cfg = outcome.into_config();
     info!("multimux-edge: loaded config: {cfg:?}");
 
-    #[allow(clippy::arc_with_non_send_sync)]
     let registry = Arc::new(Registry::new(
         cfg,
         Arc::new(VdoCaptureFactory),
@@ -202,26 +201,49 @@ impl CaptureFactory for VdoCaptureFactory {
             "multimux-edge: starting capture {label}: {}",
             settings.describe()
         );
-        std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("build current-thread runtime for a VDO capture");
-            rt.block_on(multimux::supervise_driver(
-                move |route_handle| {
-                    let status = status.clone();
-                    let stop = thread_stop.clone();
-                    async move {
-                        run_vdo_capture(&settings, window_segments, &status, &route_handle, &stop)
-                            .await
+        let thread_status = status.clone();
+        let thread_name = format!("capture-{label}");
+        let spawned = std::thread::Builder::new()
+            .name(thread_name)
+            .spawn(move || {
+                let rt = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(rt) => rt,
+                    Err(e) => {
+                        let reason = format!("capture runtime build failed: {e}");
+                        error!("multimux-edge: {reason}");
+                        thread_status.set_last_error(Some(reason));
+                        return;
                     }
-                },
-                route,
-                Backoff::production_default(),
-                label,
-                thread_cancel,
-            ));
-        });
+                };
+                rt.block_on(multimux::supervise_driver(
+                    move |route_handle| {
+                        let status = thread_status.clone();
+                        let stop = thread_stop.clone();
+                        async move {
+                            run_vdo_capture(
+                                &settings,
+                                window_segments,
+                                &status,
+                                &route_handle,
+                                &stop,
+                            )
+                            .await
+                        }
+                    },
+                    route,
+                    Backoff::production_default(),
+                    label,
+                    thread_cancel,
+                ));
+            });
+        if let Err(e) = spawned {
+            let reason = format!("capture thread spawn failed: {e}");
+            error!("multimux-edge: {reason}");
+            status.set_last_error(Some(reason));
+        }
         Box::new(VdoCapture { stop, cancel })
     }
 }
@@ -243,6 +265,11 @@ async fn run_vdo_capture(
     route_handle: &RouteHandle,
     stop: &AtomicBool,
 ) -> multimux::Result<()> {
+    // Checked before opening anything: a retry started after `Drop` set `stop`
+    // must not open a new VDO stream / encode.
+    if stop.load(Ordering::Relaxed) {
+        return Ok(());
+    }
     let session = VdoIngestSession::new(settings).map_err(|e| MultimuxError::Connect {
         reason: format!("VdoIngestSession init failed: {e}"),
     })?;
