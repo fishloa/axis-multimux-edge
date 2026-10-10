@@ -183,7 +183,7 @@ impl Registry {
             // a short idle timeout cannot sweep it on the very next tick.
             let stamp = now.max(Instant::now());
             let max = inner.config.max_encodes;
-            let in_use = inner.captures.len() as u32;
+            let in_use = own_encodes(&inner.captures);
             if in_use >= max {
                 return Err(ServeError::EncoderBusy { in_use, max });
             }
@@ -296,18 +296,29 @@ impl Registry {
                     },
                     idle_secs: now.saturating_duration_since(c.last_used).as_secs(),
                     last_error: st.last_error,
+                    shared_encode: st.shared_encode,
                 }
             })
             .collect();
         streams.sort_by(|a, b| a.names.cmp(&b.names));
         RegistryStatus {
             encodes: EncodeUsage {
-                in_use: inner.captures.len() as u32,
+                in_use: own_encodes(&inner.captures),
                 max: inner.config.max_encodes,
             },
             streams,
         }
     }
+}
+
+/// Captures running an encode of their own. One that joined an existing
+/// encode costs the encoder nothing, so it doesn't count against
+/// `max_encodes`.
+fn own_encodes(captures: &HashMap<CaptureSettings, Capture>) -> u32 {
+    captures
+        .values()
+        .filter(|c| !c.status.snapshot().shared_encode)
+        .count() as u32
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -333,6 +344,9 @@ pub struct StreamStatus {
     /// Seconds since the last request.
     pub idle_secs: u64,
     pub last_error: Option<String>,
+    /// Joined an encode the camera was already running; not counted in
+    /// `encodes.in_use`.
+    pub shared_encode: bool,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -354,6 +368,8 @@ pub(crate) mod tests {
     pub(crate) struct Counts {
         pub started: AtomicUsize,
         pub stopped: AtomicUsize,
+        /// New fake captures report that they joined an existing encode.
+        pub share: std::sync::atomic::AtomicBool,
     }
     pub(crate) struct FakeFactory(pub Arc<Counts>);
     struct FakeHandle(Arc<Counts>);
@@ -368,11 +384,14 @@ pub(crate) mod tests {
             &self,
             _: CaptureSettings,
             _: Arc<RouteHandle>,
-            _: StatusHandle,
+            status: StatusHandle,
             _: usize,
             _: String,
         ) -> Box<dyn CaptureHandle> {
             self.0.started.fetch_add(1, Ordering::SeqCst);
+            if self.0.share.load(Ordering::SeqCst) {
+                status.set_shared_encode(true);
+            }
             Box::new(FakeHandle(self.0.clone()))
         }
     }
@@ -770,5 +789,24 @@ pub(crate) mod tests {
         assert_eq!(s.streams[0].settings, "h264 1280x720@25 ch1");
         assert_eq!(s.streams[0].state, "starting");
         assert_eq!(s.streams[0].idle_secs, 3);
+    }
+
+    #[tokio::test]
+    async fn captures_sharing_an_existing_encode_do_not_count_against_the_cap() {
+        let (reg, counts, _) = setup(&[("hi", "ACC_High"), ("med", "ACC_Medium")]);
+        let mut cfg = reg.config();
+        cfg.max_encodes = 1;
+        reg.apply(cfg);
+        counts.share.store(true, Ordering::SeqCst);
+        let t0 = Instant::now();
+        reg.ensure("hi", t0).await.unwrap();
+        reg.ensure("med", t0).await.unwrap();
+        let s = reg.snapshot(t0);
+        assert_eq!((s.encodes.in_use, s.encodes.max), (0, 1));
+        assert!(s.streams.iter().all(|st| st.shared_encode));
+        // An own encode still counts, and the cap still applies to the next.
+        counts.share.store(false, Ordering::SeqCst);
+        reg.ensure("main", t0).await.unwrap();
+        assert_eq!(reg.snapshot(t0).encodes.in_use, 1);
     }
 }

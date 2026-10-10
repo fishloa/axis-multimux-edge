@@ -277,6 +277,9 @@ pub struct Status {
     pub frames: u64,
     /// The most recent pipeline error, if any, as its `Display` text.
     pub last_error: Option<String>,
+    /// The capture joined an encode the camera was already running (for
+    /// its RTSP clients, say), so it costs the encoder nothing.
+    pub shared_encode: bool,
 }
 
 /// Internal state behind [`StatusHandle`]: the served [`Status`] plus a
@@ -329,6 +332,15 @@ impl StatusHandle {
         let mut state = self.0.lock().expect("status mutex poisoned");
         state.status.current_segment = current_segment;
         state.status.current_part = current_part;
+    }
+
+    /// Record whether the capture joined an existing encode.
+    pub fn set_shared_encode(&self, shared: bool) {
+        self.0
+            .lock()
+            .expect("status mutex poisoned")
+            .status
+            .shared_encode = shared;
     }
 
     /// Add `n` to the processed-frame counter.
