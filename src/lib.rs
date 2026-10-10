@@ -8,6 +8,7 @@ pub mod admin;
 pub mod config;
 pub mod convert;
 pub mod error;
+pub mod openapi;
 pub mod profile;
 pub mod profile_source;
 pub mod registry;

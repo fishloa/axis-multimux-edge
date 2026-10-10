@@ -17,9 +17,13 @@ use std::sync::{Arc, Mutex};
 use axum::Router;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::response::{IntoResponse, Json};
+use axum::response::{IntoResponse, Json, Response};
 use axum::routing::get;
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+
+use crate::config::FieldError;
+use crate::registry::{Registry, RegistryStatus};
 
 pub use crate::config::Config;
 
@@ -361,77 +365,178 @@ impl Default for StatusHandle {
     }
 }
 
-/// Admin router state: the [`ConfigStore`] plus the shared [`StatusHandle`].
-struct AdminState<S: ConfigStore> {
-    store: Arc<S>,
-    status: StatusHandle,
+/// Response of `GET /admin/status`.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AdminStatus {
+    /// The config-backend or pipeline error, if any.
+    pub last_error: Option<String>,
+    #[serde(flatten)]
+    pub registry: RegistryStatus,
 }
 
-// Manual `Clone` (rather than `#[derive]`) so cloning `AdminState<S>` never
-// requires `S: Clone` — only `Arc<S>` and `StatusHandle` need to be cloned.
+/// One camera stream profile and what this app would capture for it.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ProfileView {
+    pub name: String,
+    pub description: String,
+    /// Raw `key=value&...` parameter string of the camera profile.
+    pub parameters: String,
+    /// Human-readable capture settings, when the profile is usable.
+    pub settings: Option<String>,
+    pub ignored_keys: Vec<String>,
+    /// Why the profile cannot be captured, if so.
+    pub error: Option<String>,
+}
+
+/// Response of `GET /admin/profiles`.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ProfilesResponse {
+    pub profiles: Vec<ProfileView>,
+    /// Set when the camera's profile list could not be read.
+    pub error: Option<String>,
+}
+
+/// 400 body of `POST /admin/config`.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ValidationErrors {
+    pub errors: Vec<FieldError>,
+}
+
+/// 200 body of `POST /admin/config`.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct Applied {
+    /// Always `applied`.
+    pub status: String,
+}
+
+/// Admin router state.
+pub(crate) struct AdminState<S: ConfigStore> {
+    store: Arc<S>,
+    app_status: StatusHandle,
+    registry: Arc<Registry>,
+}
+
+// Manual `Clone` so cloning never requires `S: Clone`.
 impl<S: ConfigStore> Clone for AdminState<S> {
     fn clone(&self) -> Self {
         AdminState {
             store: Arc::clone(&self.store),
-            status: self.status.clone(),
+            app_status: self.app_status.clone(),
+            registry: Arc::clone(&self.registry),
         }
     }
 }
 
-/// Build the admin router: `GET`/`POST /admin/config` against `store`, and
-/// `GET /admin/status` reading `status`. Fully applies its state, so the
-/// returned [`Router`] merges directly with `multimux::origin::router`'s.
-pub fn admin_router<S: ConfigStore>(store: Arc<S>, status: StatusHandle) -> Router {
-    let state = AdminState { store, status };
+/// Build the admin router. Fully applies its state, so the returned
+/// [`Router`] merges directly with `multimux::origin::router`'s.
+pub fn admin_router<S: ConfigStore>(
+    store: Arc<S>,
+    app_status: StatusHandle,
+    registry: Arc<Registry>,
+) -> Router {
+    let state = AdminState {
+        store,
+        app_status,
+        registry,
+    };
     Router::new()
-        .route("/admin/config", get(get_config).post(post_config))
-        .route("/admin/status", get(get_status))
+        .route("/admin/config", get(get_config::<S>).post(post_config::<S>))
+        .route("/admin/status", get(get_status::<S>))
+        .route("/admin/profiles", get(get_profiles::<S>))
+        .route("/admin/openapi.json", get(get_openapi))
         .with_state(state)
 }
 
-async fn get_config<S: ConfigStore>(State(state): State<AdminState<S>>) -> Json<Config> {
+/// Current configuration.
+#[utoipa::path(get, path = "/admin/config", responses((status = 200, body = Config)))]
+pub(crate) async fn get_config<S: ConfigStore>(State(state): State<AdminState<S>>) -> Json<Config> {
     let outcome = state.store.load();
-    // A broken backend is real evidence, not noise to discard the way the
-    // old `load()` did (issue #955) — surface it through `/admin/status`'s
-    // `last_error` so an operator watching the settings page sees it even
-    // though this endpoint still has to answer with *some* `Config`. Uses
-    // the config-specific slot (`set_config_error`), not the pipeline's
-    // `set_last_error`, so a later pipeline restart's own error handling
-    // can't silently clear it.
+    // A broken backend is real evidence (issue #955): surface it through
+    // `/admin/status`'s `last_error` in the config-specific slot.
     if let Some(reason) = outcome.error() {
         state
-            .status
+            .app_status
             .set_config_error(Some(format!("config load: {reason}")));
     }
     Json(outcome.into_config())
 }
 
-async fn post_config<S: ConfigStore>(
+/// Validate, store and apply a configuration. Applies immediately.
+#[utoipa::path(post, path = "/admin/config", request_body = Config, responses(
+    (status = 200, body = Applied),
+    (status = 400, body = ValidationErrors),
+    (status = 500, description = "config store failed", body = String),
+))]
+pub(crate) async fn post_config<S: ConfigStore>(
     State(state): State<AdminState<S>>,
     Json(cfg): Json<Config>,
-) -> impl IntoResponse {
+) -> Response {
     if let Err(errors) = cfg.validate() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "errors": errors })),
-        )
-            .into_response();
+        return (StatusCode::BAD_REQUEST, Json(ValidationErrors { errors })).into_response();
     }
-    match state.store.store(&cfg) {
-        Ok(()) => (
-            StatusCode::OK,
-            Json(serde_json::json!({
-                "status": "ok",
-                "note": "takes effect on restart",
-            })),
-        )
-            .into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    if let Err(e) = state.store.store(&cfg) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+    }
+    state.registry.apply(cfg);
+    Json(Applied {
+        status: "applied".into(),
+    })
+    .into_response()
+}
+
+/// Encoder usage and every running capture.
+#[utoipa::path(get, path = "/admin/status", responses((status = 200, body = AdminStatus)))]
+pub(crate) async fn get_status<S: ConfigStore>(
+    State(state): State<AdminState<S>>,
+) -> Json<AdminStatus> {
+    Json(AdminStatus {
+        last_error: state.app_status.snapshot().last_error,
+        registry: state.registry.snapshot(std::time::Instant::now()),
+    })
+}
+
+/// The camera's stream profiles and what this app would capture for each.
+#[utoipa::path(get, path = "/admin/profiles", responses((status = 200, body = ProfilesResponse)))]
+pub(crate) async fn get_profiles<S: ConfigStore>(
+    State(state): State<AdminState<S>>,
+) -> Json<ProfilesResponse> {
+    let main = state.registry.config().main;
+    match state.registry.profiles().list().await {
+        Ok(list) => Json(ProfilesResponse {
+            profiles: list
+                .into_iter()
+                .map(|p| {
+                    let parsed = crate::profile::parse_profile(&p.parameters, &main);
+                    ProfileView {
+                        settings: parsed.as_ref().ok().map(|x| x.settings.describe()),
+                        ignored_keys: parsed
+                            .as_ref()
+                            .map(|x| x.ignored_keys.clone())
+                            .unwrap_or_default(),
+                        error: parsed.err(),
+                        name: p.name,
+                        description: p.description,
+                        parameters: p.parameters,
+                    }
+                })
+                .collect(),
+            error: None,
+        }),
+        Err(e) => Json(ProfilesResponse {
+            profiles: Vec::new(),
+            error: Some(e),
+        }),
     }
 }
 
-async fn get_status<S: ConfigStore>(State(state): State<AdminState<S>>) -> Json<Status> {
-    Json(state.status.snapshot())
+/// This API's OpenAPI 3 description.
+#[utoipa::path(get, path = "/admin/openapi.json", responses((status = 200, description = "OpenAPI document")))]
+pub(crate) async fn get_openapi() -> Response {
+    (
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        crate::openapi::openapi_json(),
+    )
+        .into_response()
 }
 
 #[cfg(test)]
@@ -442,8 +547,132 @@ mod tests {
 
     use super::*;
 
+    use crate::registry::tests::setup;
+
+    fn router_with(streams: &[(&str, &str)]) -> (Router, Arc<crate::registry::Registry>) {
+        let (reg, _, _) = setup(streams);
+        (
+            admin_router(Arc::new(DefaultStore), StatusHandle::new(), reg.clone()),
+            reg,
+        )
+    }
+
     fn router() -> Router {
-        admin_router(Arc::new(DefaultStore), StatusHandle::new())
+        router_with(&[]).0
+    }
+
+    async fn post_json(app: Router, uri: &str, v: &serde_json::Value) -> axum::response::Response {
+        app.oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(uri)
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(v).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn post_config_applies_live() {
+        let (app, reg) = router_with(&[]);
+        let cfg = Config {
+            streams: vec![crate::config::StreamMapping {
+                name: "med".into(),
+                profile: "ACC_Medium".into(),
+            }],
+            default_stream: Some("med".into()),
+            ..Config::default()
+        };
+        let r = post_json(app, "/admin/config", &serde_json::to_value(&cfg).unwrap()).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert_eq!(body_json(r).await["status"], "applied");
+        assert_eq!(reg.default_name(), "med");
+    }
+
+    #[tokio::test]
+    async fn post_config_invalid_returns_field_errors_and_applies_nothing() {
+        let (app, reg) = router_with(&[]);
+        let cfg = Config {
+            streams: vec![crate::config::StreamMapping {
+                name: "Bad Name".into(),
+                profile: "P".into(),
+            }],
+            ..Config::default()
+        };
+        let r = post_json(app, "/admin/config", &serde_json::to_value(&cfg).unwrap()).await;
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(body_json(r).await["errors"][0]["field"], "streams[0].name");
+        assert!(reg.config().streams.is_empty());
+    }
+
+    #[tokio::test]
+    async fn profiles_lists_camera_profiles_with_parsed_settings() {
+        let app = router();
+        let r = app
+            .oneshot(
+                Request::builder()
+                    .uri("/admin/profiles")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK);
+        let v = body_json(r).await;
+        let med = v["profiles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == "ACC_Medium")
+            .unwrap();
+        assert_eq!(med["settings"], "h264 1280x720@25 ch0");
+        let mj = v["profiles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == "MJPEG")
+            .unwrap();
+        assert!(mj["error"].as_str().unwrap().contains("jpeg"));
+        assert!(v["error"].is_null());
+    }
+
+    #[tokio::test]
+    async fn status_has_encodes_and_streams() {
+        let (app, reg) = router_with(&[("med", "ACC_Medium")]);
+        let _ = reg.ensure("med", std::time::Instant::now()).await.unwrap();
+        let r = app
+            .oneshot(
+                Request::builder()
+                    .uri("/admin/status")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let v = body_json(r).await;
+        assert_eq!(v["encodes"]["in_use"], 1);
+        assert_eq!(v["streams"][0]["names"][0], "med");
+        assert!(v["last_error"].is_null());
+    }
+
+    #[tokio::test]
+    async fn openapi_json_is_served() {
+        let r = router()
+            .oneshot(
+                Request::builder()
+                    .uri("/admin/openapi.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK);
+        let v = body_json(r).await;
+        for p in ["/admin/config", "/admin/status", "/admin/profiles"] {
+            assert!(v["paths"][p].is_object(), "missing {p}");
+        }
     }
 
     async fn body_json(response: axum::response::Response) -> serde_json::Value {
@@ -542,33 +771,6 @@ mod tests {
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
-    #[tokio::test]
-    async fn get_status_returns_expected_fields() {
-        let status = StatusHandle::new();
-        status.set_running(true);
-        status.set_position(3, 2);
-        status.add_frames(42);
-        status.set_last_error(Some("boom".to_string()));
-
-        let response = admin_router(Arc::new(DefaultStore), status)
-            .oneshot(
-                Request::builder()
-                    .uri("/admin/status")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-        let value = body_json(response).await;
-        assert_eq!(value["running"], serde_json::json!(true));
-        assert_eq!(value["current_segment"], serde_json::json!(3));
-        assert_eq!(value["current_part"], serde_json::json!(2));
-        assert_eq!(value["frames"], serde_json::json!(42));
-        assert_eq!(value["last_error"], serde_json::json!("boom"));
-    }
-
     #[test]
     fn parse_stored_treats_empty_and_truncated_as_unset() {
         assert_eq!(parse_stored(""), LoadOutcome::Unset);
@@ -652,15 +854,19 @@ mod tests {
 
     #[tokio::test]
     async fn get_config_returns_the_actually_stored_value_when_present() {
-        let response = admin_router(Arc::new(StoredStore), StatusHandle::new())
-            .oneshot(
-                Request::builder()
-                    .uri("/admin/config")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let response = admin_router(
+            Arc::new(StoredStore),
+            StatusHandle::new(),
+            router_with(&[]).1,
+        )
+        .oneshot(
+            Request::builder()
+                .uri("/admin/config")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
         let cfg: Config = serde_json::from_value(body_json(response).await).unwrap();
@@ -670,7 +876,7 @@ mod tests {
     #[tokio::test]
     async fn get_config_on_broken_backend_still_serves_defaults_but_records_last_error() {
         let status = StatusHandle::new();
-        let router = admin_router(Arc::new(BrokenStore), status.clone());
+        let router = admin_router(Arc::new(BrokenStore), status.clone(), router_with(&[]).1);
 
         let response = router
             .oneshot(
