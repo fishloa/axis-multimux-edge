@@ -29,6 +29,7 @@ serde_json = "1"
 thiserror = "2"
 log       = "0.4"
 utoipa    = "6"
+tower     = { version = "0.5", features = ["util"] }
 
 # device-only (ACAP SDK Docker): acap-rs crates, git-pinned (unpublished 0.0.0).
 # fishloa/acap-rs fork: upstream rev 5eed2e2 (branch `fw11-vdo-compat-v2`) plus
@@ -64,4 +65,3 @@ default = []
 device = ["dep:vdo", "dep:axparameter", "dep:acap-logging", "dep:acap-vapix", "dep:broadcast-common", "dep:media-plane"]
 
 [dev-dependencies]
-tower = { version = "0.5", features = ["util"] }
