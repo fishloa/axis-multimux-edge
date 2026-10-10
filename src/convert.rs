@@ -79,7 +79,7 @@ const UNKNOWN_DIMENSION: u16 = 0;
 const MICROS_PER_SECOND: u64 = 1_000_000;
 
 /// The video codec family of a VDO stream.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Codec {
     /// H.264 / AVC (ISO/IEC 14496-10).
     H264,

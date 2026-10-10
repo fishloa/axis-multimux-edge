@@ -8,6 +8,7 @@ pub mod admin;
 pub mod config;
 pub mod convert;
 pub mod error;
+pub mod profile;
 
 #[cfg(feature = "device")]
 pub mod vdo_source;
