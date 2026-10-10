@@ -632,7 +632,7 @@ mod tests {
             .iter()
             .find(|p| p["name"] == "ACC_Medium")
             .unwrap();
-        assert_eq!(med["settings"], "h264 1280x720@25 ch0");
+        assert_eq!(med["settings"], "h264 1280x720@25 ch1");
         let mj = v["profiles"]
             .as_array()
             .unwrap()

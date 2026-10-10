@@ -767,7 +767,7 @@ pub(crate) mod tests {
         assert_eq!((s.encodes.in_use, s.encodes.max), (1, 2));
         assert_eq!(s.streams.len(), 1);
         assert_eq!(s.streams[0].names, vec!["a".to_string(), "b".to_string()]);
-        assert_eq!(s.streams[0].settings, "h264 1280x720@25 ch0");
+        assert_eq!(s.streams[0].settings, "h264 1280x720@25 ch1");
         assert_eq!(s.streams[0].state, "starting");
         assert_eq!(s.streams[0].idle_secs, 3);
     }

@@ -98,10 +98,16 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// Parse `parameters`; keys the profile leaves out come from `fallback`
-/// (codec, resolution, channel). A missing `fps` means camera default (0).
+/// The camera a profile without `camera=` streams from: VAPIX's default,
+/// which is what the camera's own RTSP server uses for the same profile.
+pub const DEFAULT_CAMERA: u32 = 1;
+
+/// Parse `parameters`; codec and resolution the profile leaves out come from
+/// `fallback`. A missing `camera` means [`DEFAULT_CAMERA`] and a missing `fps`
+/// camera default (0).
 pub fn parse_profile(parameters: &str, fallback: &MainPreset) -> Result<ParsedProfile, String> {
     let mut settings = CaptureSettings::from_main(fallback)?;
+    settings.channel = DEFAULT_CAMERA;
     settings.framerate = 0;
     let mut ignored = std::collections::BTreeSet::new();
     for pair in parameters.split('&').filter(|p| !p.is_empty()) {
@@ -182,7 +188,8 @@ mod tests {
     fn missing_keys_fall_back_to_main_and_fps_to_zero() {
         let p = parse_profile("resolution=640x360", &main_preset()).unwrap();
         assert_eq!(p.settings.codec, Codec::H264);
-        assert_eq!(p.settings.channel, 0);
+        // A missing `camera` is VAPIX's default camera 1, not the main preset's channel.
+        assert_eq!(p.settings.channel, 1);
         assert_eq!(p.settings.framerate, 0);
         assert_eq!((p.settings.width, p.settings.height), (640, 360));
         let p = parse_profile("", &main_preset()).unwrap();
