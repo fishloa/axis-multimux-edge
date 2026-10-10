@@ -1,7 +1,7 @@
 //! Maps stream names to running captures. Captures start on the first
 //! request for a name, are shared by every name that resolves to the same
 //! [`CaptureSettings`], count against `max_encodes`, and stop when idle
-//! (Task 5) or when a config change unmaps them (Task 5).
+//! (see `sweep`) or when a config change unmaps them (see `apply`).
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
@@ -649,15 +649,17 @@ pub(crate) mod tests {
         let (reg, counts, _) =
             setup(&[("hi", "ACC_High"), ("med", "ACC_Medium"), ("lo", "ACC_Low")]);
         let t0 = Instant::now();
-        reg.ensure("hi", t0).await.unwrap();
-        reg.ensure("med", t0 + Duration::from_secs(20))
+        let _ = reg.ensure("hi", t0).await.unwrap();
+        let _ = reg
+            .ensure("med", t0 + Duration::from_secs(20))
             .await
             .unwrap();
         reg.sweep(t0 + Duration::from_secs(29));
         assert_eq!(counts.stopped.load(Ordering::SeqCst), 0);
         reg.sweep(t0 + Duration::from_secs(30));
         assert_eq!(counts.stopped.load(Ordering::SeqCst), 1); // "hi" idle 30 s
-        reg.ensure("lo", t0 + Duration::from_secs(31))
+        let _ = reg
+            .ensure("lo", t0 + Duration::from_secs(31))
             .await
             .unwrap(); // slot freed
     }
@@ -667,7 +669,8 @@ pub(crate) mod tests {
         let (reg, counts, _) = setup(&[("med", "ACC_Medium")]);
         let t0 = Instant::now();
         for s in [0, 20, 40, 60] {
-            reg.ensure("med", t0 + Duration::from_secs(s))
+            let _ = reg
+                .ensure("med", t0 + Duration::from_secs(s))
                 .await
                 .unwrap();
             reg.sweep(t0 + Duration::from_secs(s + 1));
@@ -680,14 +683,14 @@ pub(crate) mod tests {
     async fn apply_keeps_unchanged_streams_running() {
         let (reg, counts, _) = setup(&[("med", "ACC_Medium"), ("lo", "ACC_Low")]);
         let now = Instant::now();
-        reg.ensure("med", now).await.unwrap();
+        let _ = reg.ensure("med", now).await.unwrap();
         let mut cfg = reg.config();
         cfg.streams.retain(|s| s.name != "lo");
         cfg.default_stream = Some("med".into());
         cfg.max_encodes = 3;
         reg.apply(cfg);
         assert_eq!(counts.stopped.load(Ordering::SeqCst), 0);
-        reg.ensure("med", now).await.unwrap();
+        let _ = reg.ensure("med", now).await.unwrap();
         assert_eq!(counts.started.load(Ordering::SeqCst), 1);
         assert_eq!(reg.default_name(), "med");
     }
@@ -696,8 +699,8 @@ pub(crate) mod tests {
     async fn apply_stops_remapped_and_removed_streams() {
         let (reg, counts, _) = setup(&[("med", "ACC_Medium"), ("lo", "ACC_Low")]);
         let now = Instant::now();
-        reg.ensure("med", now).await.unwrap();
-        reg.ensure("lo", now).await.unwrap();
+        let _ = reg.ensure("med", now).await.unwrap();
+        let _ = reg.ensure("lo", now).await.unwrap();
         let mut cfg = reg.config();
         cfg.streams = vec![StreamMapping {
             name: "med".into(),
@@ -709,7 +712,7 @@ pub(crate) mod tests {
             reg.ensure("lo", now).await,
             Err(ServeError::NotFound)
         ));
-        reg.ensure("med", now).await.unwrap(); // restarts with ACC_High
+        let _ = reg.ensure("med", now).await.unwrap(); // restarts with ACC_High
         assert_eq!(counts.started.load(Ordering::SeqCst), 3);
     }
 
@@ -717,8 +720,8 @@ pub(crate) mod tests {
     async fn shared_capture_survives_while_one_name_still_maps_to_it() {
         let (reg, counts, _) = setup(&[("a", "ACC_Medium"), ("b", "ACC_Medium")]);
         let now = Instant::now();
-        reg.ensure("a", now).await.unwrap();
-        reg.ensure("b", now).await.unwrap();
+        let _ = reg.ensure("a", now).await.unwrap();
+        let _ = reg.ensure("b", now).await.unwrap();
         let mut cfg = reg.config();
         cfg.streams.retain(|s| s.name != "b");
         reg.apply(cfg);
@@ -729,8 +732,8 @@ pub(crate) mod tests {
     async fn apply_llhls_change_restarts_everything() {
         let (reg, counts, _) = setup(&[("med", "ACC_Medium")]);
         let now = Instant::now();
-        reg.ensure("med", now).await.unwrap();
-        reg.ensure("main", now).await.unwrap();
+        let _ = reg.ensure("med", now).await.unwrap();
+        let _ = reg.ensure("main", now).await.unwrap();
         let mut cfg = reg.config();
         cfg.part_target_ms = 250;
         reg.apply(cfg);
@@ -741,8 +744,8 @@ pub(crate) mod tests {
     async fn apply_main_change_restarts_only_main() {
         let (reg, counts, _) = setup(&[("med", "ACC_Medium")]);
         let now = Instant::now();
-        reg.ensure("med", now).await.unwrap();
-        reg.ensure("main", now).await.unwrap();
+        let _ = reg.ensure("med", now).await.unwrap();
+        let _ = reg.ensure("main", now).await.unwrap();
         let mut cfg = reg.config();
         cfg.main.framerate = 15;
         reg.apply(cfg);
@@ -753,8 +756,8 @@ pub(crate) mod tests {
     async fn snapshot_reports_encodes_and_streams() {
         let (reg, _, _) = setup(&[("a", "ACC_Medium"), ("b", "ACC_Medium")]);
         let t0 = Instant::now();
-        reg.ensure("a", t0).await.unwrap();
-        reg.ensure("b", t0).await.unwrap();
+        let _ = reg.ensure("a", t0).await.unwrap();
+        let _ = reg.ensure("b", t0).await.unwrap();
         let s = reg.snapshot(t0 + Duration::from_secs(3));
         assert_eq!((s.encodes.in_use, s.encodes.max), (1, 2));
         assert_eq!(s.streams.len(), 1);
