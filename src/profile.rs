@@ -74,18 +74,23 @@ fn parse_u32(key: &str, v: &str) -> Result<u32, String> {
         .map_err(|_| format!("{key}: \"{v}\" is not a number"))
 }
 
+/// Convert a hex digit character (0-9, a-f, A-F) to its value, or None if invalid.
+fn hex_val(b: u8) -> Option<u8> {
+    (b as char).to_digit(16).map(|d| d as u8)
+}
+
 fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'%'
-            && i + 2 < bytes.len()
-            && let Ok(b) = u8::from_str_radix(&s[i + 1..i + 3], 16)
-        {
-            out.push(b);
-            i += 3;
-            continue;
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            // Try to decode two hex digits as a single byte.
+            if let (Some(hi), Some(lo)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
+                out.push((hi << 4) | lo);
+                i += 3;
+                continue;
+            }
         }
         out.push(if bytes[i] == b'+' { b' ' } else { bytes[i] });
         i += 1;
@@ -121,7 +126,8 @@ pub fn parse_profile(parameters: &str, fallback: &MainPreset) -> Result<ParsedPr
             "fps" => settings.framerate = parse_u32("fps", &value)?,
             "camera" => settings.channel = parse_u32("camera", &value)?,
             "videokeyframeinterval" => {
-                settings.gop_length = Some(parse_u32("videokeyframeinterval", &value)?)
+                let gop = parse_u32("videokeyframeinterval", &value)?;
+                settings.gop_length = if gop == 0 { None } else { Some(gop) }
             }
             _ => {
                 ignored.insert(key);
@@ -235,5 +241,40 @@ mod tests {
         let mut m = main_preset();
         m.codec = "vp9".into();
         assert!(CaptureSettings::from_main(&m).is_err());
+    }
+
+    #[test]
+    fn percent_decode_utf8_safe() {
+        // Test that invalid escape sequences and multi-byte UTF-8 don't panic.
+        // "%4é" has a literal '%' at position 0, '4' at position 1, but 'é' is a multi-byte UTF-8 char.
+        // The sequence "%4" is incomplete (needs 2 hex digits), so both '%' and '4' stay literal.
+        let result = percent_decode("%4é");
+        assert_eq!(result, "%4é");
+
+        // Trailing "%" stays literal.
+        let result = percent_decode("test%");
+        assert_eq!(result, "test%");
+
+        // Incomplete "%4" stays literal.
+        let result = percent_decode("%4");
+        assert_eq!(result, "%4");
+
+        // Invalid hex "%zz" stays literal.
+        let result = percent_decode("%zz");
+        assert_eq!(result, "%zz");
+
+        // Valid hex "%41" (0x41 = 'A') decodes correctly.
+        let result = percent_decode("%41");
+        assert_eq!(result, "A");
+    }
+
+    #[test]
+    fn gop_length_zero_maps_to_none() {
+        let p = parse_profile("videokeyframeinterval=0", &main_preset()).unwrap();
+        assert_eq!(p.settings.gop_length, None);
+
+        // Non-zero gop_length is still Some.
+        let p = parse_profile("videokeyframeinterval=50", &main_preset()).unwrap();
+        assert_eq!(p.settings.gop_length, Some(50));
     }
 }
