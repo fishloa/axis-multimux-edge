@@ -430,7 +430,8 @@
           "current_part",
           "frames",
           "fps",
-          "idle_secs"
+          "idle_secs",
+          "shared_encode"
         ],
         "properties": {
           "current_part": {
@@ -478,6 +479,10 @@
           "settings": {
             "type": "string",
             "description": "e.g. `h264 1280x720@25 ch1`."
+          },
+          "shared_encode": {
+            "type": "boolean",
+            "description": "Joined an encode the camera was already running; not counted in\n`encodes.in_use`."
           },
           "state": {
             "type": "string",
