@@ -343,8 +343,11 @@ fn scan_for_param_sets(
 
     let started = Instant::now();
     let mut last_warn = started;
-    for i in 0usize.. {
+    let mut seen: usize = 0;
+    loop {
         let buf = running.next_buffer()?;
+        let i = seen;
+        seen += 1;
         if stop.load(Ordering::Relaxed) {
             return Err(OriginError::Convert(
                 "capture stopped while waiting for a key frame".into(),
@@ -355,7 +358,7 @@ fn scan_for_param_sets(
             log::warn!(
                 "vdo scan: still waiting for a key frame after {}s ({} buffers seen)",
                 started.elapsed().as_secs(),
-                i + 1,
+                seen,
             );
         }
         let ft = buf.frame_type();
@@ -413,7 +416,6 @@ fn scan_for_param_sets(
         }
         // non-key pictures / SEI while scanning: dropped
     }
-    unreachable!("the scan loop only exits by returning")
 }
 
 /// Which parameter-set NAL a VDO parameter-set frame type carries.
