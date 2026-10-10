@@ -6,13 +6,13 @@
 
 **Architecture:** A `Registry` maps names to capture settings (from camera profiles via VAPIX, or the built-in `main` preset), starts one VDO capture per distinct settings on first request, stops it when idle, and enforces an encode cap. A front router forwards `/hls/{name}/…` to a per-capture multimux origin router (pattern proven in the spike). The config becomes v2 (mappings, default, cap, idle timeout); `POST /admin/config` applies it live. `utoipa` generates `openapi.json`.
 
-**Tech Stack:** Rust 2024 (toolchain 1.97), axum 0.7, tokio, multimux 0.10, serde, utoipa 6, acap-rs fork (`vdo`, `axparameter`, `acap-logging`, `acap-vapix`) at rev `3c513f92bf3dc2e6d1dbb1e3d5c00c0c294a6a69`.
+**Tech Stack:** Rust 2024 (toolchain 1.97), axum 0.8, tokio, tokio-util 0.7, multimux 0.11, serde, utoipa 6, acap-rs fork (`vdo`, `axparameter`, `acap-logging`, `acap-vapix`) at rev `b1f674c7b5fdde8e171911c591cf1ecb0b3296b6`.
 
 **Spec:** `docs/superpowers/specs/2026-10-02-stream-profiles-design.md`
 
 ## Global Constraints
 
-- Branch `stream-profiles` (based on `rename-multimux-edge`). Commit after every task; never discard uncommitted work.
+- Branch `stream-profiles` (based on `main` at v0.2.0: multimux 0.11, axum 0.8, the first-run config fix already shipped). Commit after every task; never discard uncommitted work.
 - Host build has no `device` feature: `cargo test --locked`, `cargo clippy --locked -- -D warnings`, `cargo fmt --all --check` must pass after every task (this is CI's `host` job).
 - Device-only code goes behind `#[cfg(feature = "device")]`, as today.
 - App listens on `127.0.0.1:2999` always; `APP_PORT` must equal the port in `manifest.json`'s `reverseProxy` targets. No `port` config field.
@@ -930,7 +930,7 @@ mod device {
 
 `Cargo.toml` `[dependencies]`, next to the other acap-rs crates:
 ```toml
-acap-vapix   = { git = "https://github.com/fishloa/acap-rs", rev = "3c513f92bf3dc2e6d1dbb1e3d5c00c0c294a6a69", optional = true }
+acap-vapix   = { git = "https://github.com/fishloa/acap-rs", rev = "b1f674c7b5fdde8e171911c591cf1ecb0b3296b6", optional = true }
 ```
 and add `"dep:acap-vapix"` to the `device` feature list.
 
@@ -1684,7 +1684,7 @@ use crate::registry::{INNER_STREAM, Registry, ServeError};
 pub fn hls_router(registry: Arc<Registry>) -> Router {
     Router::new()
         .route("/media.m3u8", get(bare))
-        .route("/:name/*rest", any(forward))
+        .route("/{name}/{*rest}", any(forward))
         .with_state(registry)
 }
 
@@ -1761,7 +1761,7 @@ git commit -m "HLS front router: per-name forwarding, default redirect, clear 50
 
 ---
 
-### Task 7: Admin API — live apply, profiles, status, OpenAPI, first-run fix
+### Task 7: Admin API — live apply, profiles, status, OpenAPI
 
 **Files:**
 - Modify: `src/admin.rs`
@@ -1992,28 +1992,7 @@ async fn get_openapi() -> Response {
 
 (`use axum::response::Response;` and `use crate::registry::{Registry, RegistryStatus};` at the top.)
 
-5. **First-run truncation fix** in `AxParameterStore::ensure_parameter` (device code; verified in Task 11): `add` with an empty initial value, then always write the real default with `set` when the add succeeded:
-
-```rust
-        match inner.add(Self::PARAM_NAME, None, String::new()) {
-            Ok(()) => inner
-                .set(Self::PARAM_NAME, initial, true)
-                .map_err(|e| crate::OriginError::Config(format!("axparameter set initial: {e}"))),
-            Err(e)
-                if e.matches::<axparameter::error::ParameterError>(
-                    axparameter::error::ParameterError::ParamAdded,
-                ) =>
-            {
-                Ok(())
-            }
-            Err(e) => Err(crate::OriginError::Config(format!("axparameter add: {e}"))),
-        }
-```
-and in `load`, treat an empty stored string as `LoadOutcome::Unset` (a camera already hit by the bug, or a crash between add and set):
-```rust
-            Ok(s) if s.trim().is_empty() || s.trim() == "{" => LoadOutcome::Unset,
-```
-placed before the existing `Ok(s) => match serde_json::from_str(&s)` arm. Update the doc comment on `ensure_parameter` to say why (`add`'s initial value is truncated at the first `"` by libaxparameter, observed on AXIS OS 11.11, 2026-10-02).
+5. The first-run truncation fix (`parse_stored`, `ensure_parameter` add-then-set) already shipped in 0.2.0. Keep it; `parse_stored` must keep working with the v2 `Config` (its tests use `Config { main: MainPreset { codec: "h265".into(), ..Default::default() }, ..Config::default() }` after Task 1).
 
 - [ ] **Step 4: Implement `src/openapi.rs`**
 
@@ -2060,7 +2039,7 @@ Expected: snapshot written to `docs/src/api/openapi.json`; all tests PASS. Open 
 
 ```bash
 git add src/admin.rs src/openapi.rs src/lib.rs tests/openapi_snapshot.rs docs/src/api/openapi.json
-git commit -m "Admin API: live apply, profiles, per-stream status, OpenAPI; fix first-run config truncation" -m "Claude-Session: https://claude.ai/code/session_01QuUZ7RBZy2xeFajJo9Czza"
+git commit -m "Admin API: live apply, profiles, per-stream status, OpenAPI" -m "Claude-Session: https://claude.ai/code/session_01QuUZ7RBZy2xeFajJo9Czza"
 ```
 
 ---
@@ -2097,10 +2076,10 @@ Replace `STREAM_NAME`, `spawn_capture_pipeline` and `supervise_driver_forever` w
 /// One VDO capture on its own OS thread + current-thread runtime (see the
 /// module doc's "Threading" section). Dropping the handle stops it: the
 /// capture loop checks `stop` after every frame and `supervise_driver`
-/// sees `shutdown`.
+/// is cancelled via its `CancellationToken`.
 struct VdoCapture {
     stop: Arc<AtomicBool>,
-    shutdown: tokio::sync::watch::Sender<bool>,
+    cancel: CancellationToken,
 }
 
 impl CaptureHandle for VdoCapture {}
@@ -2108,7 +2087,7 @@ impl CaptureHandle for VdoCapture {}
 impl Drop for VdoCapture {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
-        let _ = self.shutdown.send(true);
+        self.cancel.cancel();
     }
 }
 
@@ -2124,7 +2103,8 @@ impl CaptureFactory for VdoCaptureFactory {
         label: String,
     ) -> Box<dyn CaptureHandle> {
         let stop = Arc::new(AtomicBool::new(false));
-        let (shutdown, shutdown_rx) = tokio::sync::watch::channel(false);
+        let cancel = CancellationToken::new();
+        let thread_cancel = cancel.clone();
         let thread_stop = stop.clone();
         info!("multimux-edge: starting capture {label}: {}", settings.describe());
         std::thread::spawn(move || {
@@ -2143,10 +2123,10 @@ impl CaptureFactory for VdoCaptureFactory {
                 route,
                 Backoff::production_default(),
                 label,
-                shutdown_rx,
+                thread_cancel,
             ));
         });
-        Box::new(VdoCapture { stop, shutdown })
+        Box::new(VdoCapture { stop, cancel })
     }
 }
 ```
@@ -2180,7 +2160,7 @@ After the loop, when `stop` is set, return `Ok(())` without recording an error (
 
     let bind_addr = format!("127.0.0.1:{}", multimux_edge::config::APP_PORT);
 ```
-(remove the now-unused `route_handle`, `outputs`, `AppState`, `HashMap` imports; add `use std::sync::atomic::{AtomicBool, Ordering};`, `use multimux_edge::profile::CaptureSettings;`, `use multimux_edge::profile_source::VapixProfileSource;`, `use multimux_edge::registry::{CaptureFactory, CaptureHandle, Registry};`, `use multimux_edge::routing;`). Drop the `allow` if clippy doesn't need it. Update the module doc's "Why `supervise_driver`/`advance_route`" section: one supervised capture per distinct settings, started by the registry.
+(remove the now-unused `route_handle`, `outputs`, `AppState`, `HashMap` imports; add `use std::sync::atomic::{AtomicBool, Ordering};`, `use multimux_edge::profile::CaptureSettings;`, `use multimux_edge::profile_source::VapixProfileSource;`, `use multimux_edge::registry::{CaptureFactory, CaptureHandle, Registry};`, `use multimux_edge::routing;`). `CancellationToken` is already imported (`tokio_util::sync::CancellationToken`, used by multimux 0.11's `supervise_driver`). Drop the `allow` if clippy doesn't need it. Update the module doc's "Why `supervise_driver`/`advance_route`" section: one supervised capture per distinct settings, started by the registry.
 
 - [ ] **Step 3: Host checks**
 
@@ -2674,11 +2654,6 @@ curl -u <user>:<pw> -X POST https://<cam>/local/multimuxedge/admin/config \
 - **Breaking:** `GET /admin/status` now reports `encodes` and a `streams`
   list; the single-pipeline fields moved into each stream entry.
 - Config changes apply immediately; no restart.
-
-### Fixed
-
-- A fresh install stored a truncated default config (`{`) and reported a
-  config load error until the first save.
 ```
 
 - [ ] **Step 5: Build docs and run tests**
