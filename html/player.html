@@ -17,12 +17,15 @@
   #status::before { content:"● "; color:var(--muted); }
   #status.ok::before { color:var(--ok); }
   #status.err::before { color:var(--err); }
+  label.inline { display:flex; align-items:center; gap:.35rem; }
+  .stream-select { background:#1c1c1c; color:var(--fg); border:1px solid #333; border-radius:6px; padding:.3rem .5rem; font:inherit; font-size:.85rem; max-width:40vw; }
   button { background:#1c1c1c; color:var(--fg); border:1px solid #333; border-radius:6px; padding:.35rem .7rem; cursor:pointer; }
 </style>
 </head>
 <body>
 <header>
   <h1>Multimux Edge &mdash; live</h1>
+  <select id="stream" class="stream-select" aria-label="Stream"></select>
   <a href="./">&larr; settings</a>
 </header>
 <div class="wrap">
@@ -31,7 +34,7 @@
     <span id="status">connecting&hellip;</span>
     <span id="latency"></span>
     <button id="reload">reload</button>
-    <label style="display:flex;align-items:center;gap:.35rem;"><input type="checkbox" id="ll" checked> low-latency</label>
+    <label class="inline"><input type="checkbox" id="ll" checked> low-latency</label>
   </div>
 </div>
 <script>
@@ -41,7 +44,19 @@
 </script>
 <script>
 (function () {
-  var SRC = "hls/cam/media.m3u8"; // relative to /local/multimuxedge/
+  var name = decodeURIComponent(location.hash.slice(1));
+  var SRC = name ? "hls/" + name + "/media.m3u8" : "hls/media.m3u8"; // relative to /local/multimuxedge/
+  var picker = document.getElementById("stream");
+  function opt(label, value) { var o = document.createElement("option"); o.textContent = label; o.value = value; picker.appendChild(o); }
+  opt("default", "");
+  opt("main", "main");
+  fetch("admin/config").then(function (r) { return r.json(); }).then(function (c) {
+    (c.streams || []).forEach(function (m) { opt(m.name, m.name); });
+    if (name && !Array.prototype.some.call(picker.options, function (o) { return o.value === name; })) opt(name, name);
+    picker.value = name;
+  }).catch(function () { picker.value = name; });
+  picker.value = name;
+  picker.addEventListener("change", function () { location.hash = encodeURIComponent(picker.value); location.reload(); });
   var v = document.getElementById("v");
   var statusEl = document.getElementById("status");
   var latEl = document.getElementById("latency");
