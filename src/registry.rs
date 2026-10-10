@@ -25,6 +25,7 @@ pub trait CaptureHandle: Send + Sync {}
 /// Starts captures. The device implementation runs VDO (binary); tests use
 /// a fake.
 pub trait CaptureFactory: Send + Sync + 'static {
+    /// Runs under the registry lock: must not block (spawn only).
     fn start(
         &self,
         settings: CaptureSettings,
@@ -51,13 +52,14 @@ enum Target {
     Profile(String),
 }
 
-// Fields are read by the idle reaper / status endpoints (Task 5).
-#[allow(dead_code)]
 pub(crate) struct Capture {
+    #[allow(dead_code)] // read by the reaper / status endpoints (Task 5)
     pub(crate) settings: CaptureSettings,
     pub(crate) names: BTreeSet<String>,
     pub(crate) router: axum::Router,
+    #[allow(dead_code)] // Task 5
     pub(crate) status: StatusHandle,
+    #[allow(dead_code)] // Task 5
     pub(crate) started_at: Instant,
     pub(crate) last_used: Instant,
     _handle: Box<dyn CaptureHandle>,
@@ -124,88 +126,97 @@ impl Registry {
 
     /// The router serving `name`, starting its capture if needed.
     pub async fn ensure(&self, name: &str, now: Instant) -> Result<axum::Router, ServeError> {
-        // Fast path: a capture already serves this name.
-        let (target, config) = {
+        let mut attempts = 0;
+        loop {
+            attempts += 1;
+            // Fast path: a capture already serves this name.
+            let (target, config) = {
+                let mut inner = self.lock();
+                let target = target_of(&inner.config, name).ok_or(ServeError::NotFound)?;
+                if let Some(c) = inner.captures.values_mut().find(|c| c.names.contains(name)) {
+                    c.last_used = now;
+                    return Ok(c.router.clone());
+                }
+                (target, inner.config.clone())
+            };
+
+            // Resolve settings without holding the lock (VAPIX is async).
+            let settings = match &target {
+                Target::Main => {
+                    CaptureSettings::from_main(&config.main).map_err(ServeError::Unsupported)?
+                }
+                Target::Profile(p) => {
+                    let list = self
+                        .profiles
+                        .list()
+                        .await
+                        .map_err(ServeError::ProfileUnavailable)?;
+                    let cam = list
+                        .iter()
+                        .find(|c| &c.name == p)
+                        .ok_or_else(|| ServeError::ProfileMissing(p.clone()))?;
+                    parse_profile(&cam.parameters, &config.main)
+                        .map_err(ServeError::Unsupported)?
+                        .settings
+                }
+            };
+
             let mut inner = self.lock();
-            let target = target_of(&inner.config, name).ok_or(ServeError::NotFound)?;
-            if let Some(c) = inner.captures.values_mut().find(|c| c.names.contains(name)) {
+            // The mapping may have changed while we were resolving.
+            if target_of(&inner.config, name).as_ref() != Some(&target) {
+                return Err(ServeError::NotFound);
+            }
+            // `main` may have changed too; settings resolved from the old
+            // snapshot are stale, so resolve again (bounded).
+            if inner.config.main != config.main && attempts < 3 {
+                continue;
+            }
+            if let Some(c) = inner.captures.get_mut(&settings) {
+                c.names.insert(name.to_string());
                 c.last_used = now;
                 return Ok(c.router.clone());
             }
-            (target, inner.config.clone())
-        };
-
-        // Resolve settings without holding the lock (VAPIX is async).
-        let settings = match &target {
-            Target::Main => {
-                CaptureSettings::from_main(&config.main).map_err(ServeError::Unsupported)?
+            let max = inner.config.max_encodes;
+            let in_use = inner.captures.len() as u32;
+            if in_use >= max {
+                return Err(ServeError::EncoderBusy { in_use, max });
             }
-            Target::Profile(p) => {
-                let list = self
-                    .profiles
-                    .list()
-                    .await
-                    .map_err(ServeError::ProfileUnavailable)?;
-                let cam = list
-                    .iter()
-                    .find(|c| &c.name == p)
-                    .ok_or_else(|| ServeError::ProfileMissing(p.clone()))?;
-                parse_profile(&cam.parameters, &config.main)
-                    .map_err(ServeError::Unsupported)?
-                    .settings
-            }
-        };
-
-        let mut inner = self.lock();
-        // The mapping may have changed while we were resolving.
-        if target_of(&inner.config, name).as_ref() != Some(&target) {
-            return Err(ServeError::NotFound);
-        }
-        if let Some(c) = inner.captures.get_mut(&settings) {
-            c.names.insert(name.to_string());
-            c.last_used = now;
-            return Ok(c.router.clone());
-        }
-        let max = inner.config.max_encodes;
-        let in_use = inner.captures.len() as u32;
-        if in_use >= max {
-            return Err(ServeError::EncoderBusy { in_use, max });
-        }
-        let cfg = &inner.config;
-        let route = Arc::new(RouteHandle::new(
-            cfg.target_duration_secs,
-            cfg.part_target_ms,
-            cfg.window_segments,
-        ));
-        let mut streams = HashMap::new();
-        streams.insert(
-            INNER_STREAM.to_string(),
-            (route.clone(), vec![OutputKind::LlHls.build()]),
-        );
-        let router = router(Arc::new(AppState::new(streams)));
-        let status = StatusHandle::new();
-        let handle = self.factory.start(
-            settings,
-            route,
-            status.clone(),
-            cfg.window_segments,
-            name.to_string(),
-        );
-        let mut names = BTreeSet::new();
-        names.insert(name.to_string());
-        inner.captures.insert(
-            settings,
-            Capture {
+            let cfg = &inner.config;
+            let route = Arc::new(RouteHandle::new(
+                cfg.target_duration_secs,
+                cfg.part_target_ms,
+                cfg.window_segments,
+            ));
+            let mut streams = HashMap::new();
+            streams.insert(
+                INNER_STREAM.to_string(),
+                (route.clone(), vec![OutputKind::LlHls.build()]),
+            );
+            let router = router(Arc::new(AppState::new(streams)));
+            let status = StatusHandle::new();
+            let handle = self.factory.start(
                 settings,
-                names,
-                router: router.clone(),
-                status,
-                started_at: now,
-                last_used: now,
-                _handle: handle,
-            },
-        );
-        Ok(router)
+                route,
+                status.clone(),
+                cfg.window_segments,
+                name.to_string(),
+            );
+            let mut names = BTreeSet::new();
+            names.insert(name.to_string());
+            inner.captures.insert(
+                settings,
+                Capture {
+                    settings,
+                    names,
+                    router: router.clone(),
+                    status,
+                    started_at: now,
+                    last_used: now,
+                    _handle: handle,
+                },
+            );
+            return Ok(router);
+        }
     }
 }
 
@@ -364,6 +375,145 @@ pub(crate) mod tests {
             matches!(reg2.ensure("x", now).await, Err(ServeError::ProfileUnavailable(m)) if m == "VAPIX down")
         );
         let _ = reg2.ensure("main", now).await.unwrap();
+    }
+
+    /// Parks every `list()` call until released, so callers are provably
+    /// between the fast-path check and the relock.
+    struct GatedProfileSource {
+        inner: StaticProfileSource,
+        arrived: AtomicUsize,
+        gate: tokio::sync::Notify,
+    }
+    impl crate::profile_source::ProfileSource for GatedProfileSource {
+        fn list(&self) -> crate::profile_source::BoxFuture<'_, Result<Vec<CameraProfile>, String>> {
+            Box::pin(async move {
+                let notified = self.gate.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                self.arrived.fetch_add(1, Ordering::SeqCst);
+                notified.await;
+                self.inner.list().await
+            })
+        }
+    }
+
+    fn gated(
+        streams: &[(&str, &str)],
+        max: u32,
+    ) -> (Arc<Registry>, Arc<Counts>, Arc<GatedProfileSource>) {
+        let counts = Arc::new(Counts::default());
+        let src = Arc::new(GatedProfileSource {
+            inner: StaticProfileSource::new(vec![
+                profile("ACC_High", "resolution=3840x2160&fps=25&videocodec=h264"),
+                profile("ACC_Medium", "resolution=1280x720&fps=25&videocodec=h264"),
+                profile("ACC_Low", "resolution=640x360&fps=5&videocodec=h264"),
+                profile("NoRes", "videocodec=h264"),
+            ]),
+            arrived: AtomicUsize::new(0),
+            gate: tokio::sync::Notify::new(),
+        });
+        let cfg = Config {
+            max_encodes: max,
+            streams: streams
+                .iter()
+                .map(|(n, p)| StreamMapping {
+                    name: n.to_string(),
+                    profile: p.to_string(),
+                })
+                .collect(),
+            ..Config::default()
+        };
+        let reg = Arc::new(Registry::new(
+            cfg,
+            Arc::new(FakeFactory(counts.clone())),
+            src.clone(),
+        ));
+        (reg, counts, src)
+    }
+
+    async fn wait_parked(src: &GatedProfileSource, n: usize) {
+        while src.arrived.load(Ordering::SeqCst) < n {
+            tokio::task::yield_now().await;
+        }
+    }
+
+    type Joined = tokio::task::JoinHandle<Result<(), ServeError>>;
+    fn spawn_ensure(reg: &Arc<Registry>, name: &'static str) -> Joined {
+        let reg = reg.clone();
+        tokio::spawn(async move { reg.ensure(name, Instant::now()).await.map(|_| ()) })
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn gated_concurrent_first_requests_start_exactly_one_capture() {
+        let (reg, counts, src) = gated(&[("medium", "ACC_Medium")], 2);
+        let tasks: Vec<_> = (0..8).map(|_| spawn_ensure(&reg, "medium")).collect();
+        wait_parked(&src, 8).await;
+        src.gate.notify_waiters();
+        for t in tasks {
+            t.await.unwrap().unwrap();
+        }
+        assert_eq!(counts.started.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn cap_race_for_last_slot_has_one_winner() {
+        let (reg, counts, src) = gated(
+            &[("hi", "ACC_High"), ("med", "ACC_Medium"), ("lo", "ACC_Low")],
+            2,
+        );
+        // occupy one slot
+        let first = spawn_ensure(&reg, "hi");
+        wait_parked(&src, 1).await;
+        src.gate.notify_waiters();
+        first.await.unwrap().unwrap();
+        let a = spawn_ensure(&reg, "med");
+        let b = spawn_ensure(&reg, "lo");
+        wait_parked(&src, 3).await;
+        src.gate.notify_waiters();
+        let (ra, rb) = (a.await.unwrap(), b.await.unwrap());
+        let busy = |r: &Result<(), ServeError>| {
+            matches!(r, Err(ServeError::EncoderBusy { in_use: 2, max: 2 }))
+        };
+        assert!(ra.is_ok() != rb.is_ok(), "{ra:?} {rb:?}");
+        assert!(busy(&ra) || busy(&rb));
+        assert_eq!(counts.started.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn remap_during_resolve_is_not_found_and_starts_nothing() {
+        let (reg, counts, src) = gated(&[("med", "ACC_Medium")], 2);
+        let t = spawn_ensure(&reg, "med");
+        wait_parked(&src, 1).await;
+        {
+            let mut inner = reg.inner.lock().unwrap();
+            let mut cfg = inner.config.clone();
+            cfg.streams.clear();
+            inner.config = cfg;
+        }
+        src.gate.notify_waiters();
+        assert_eq!(t.await.unwrap(), Err(ServeError::NotFound));
+        assert_eq!(counts.started.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn main_change_during_resolve_uses_new_main() {
+        // "NoRes" leaves width/height to the main preset.
+        let (reg, counts, src) = gated(&[("n", "NoRes")], 2);
+        let t = spawn_ensure(&reg, "n");
+        wait_parked(&src, 1).await;
+        let new_width = {
+            let mut inner = reg.inner.lock().unwrap();
+            inner.config.main.width += 2;
+            inner.config.main.width
+        };
+        src.gate.notify_waiters();
+        // the retry parks in list() again
+        wait_parked(&src, 2).await;
+        src.gate.notify_waiters();
+        t.await.unwrap().unwrap();
+        assert_eq!(counts.started.load(Ordering::SeqCst), 1);
+        let inner = reg.inner.lock().unwrap();
+        assert!(inner.captures.keys().all(|k| k.width == new_width));
     }
 
     #[tokio::test]
