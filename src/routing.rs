@@ -60,30 +60,41 @@ pub(crate) fn has_dot_segment(raw: &str) -> bool {
     false
 }
 
+/// Build the forwarded URI from a nested-router path and query.
+/// Takes `/{name}/{rest}` (percent-encoded) and the query string.
+/// Validates the remainder for dot segments (path traversal protection).
+/// Returns `/s/{raw_rest}[?query]` or `Err(StatusCode::BAD_REQUEST)` if invalid.
+pub(crate) fn build_forward_uri(path: &str, query: Option<&str>) -> Result<String, StatusCode> {
+    let raw = raw_rest(path).unwrap_or("");
+
+    if has_dot_segment(raw) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let mut uri_str = format!("/{INNER_STREAM}/{}", raw);
+    if let Some(q) = query {
+        uri_str.push('?');
+        uri_str.push_str(q);
+    }
+    Ok(uri_str)
+}
+
 async fn forward(
     State(reg): State<Arc<Registry>>,
     Path((name, _)): Path<(String, String)>,
     mut req: Request,
 ) -> Response {
+    // Validate and build forwarded URI before calling ensure() to avoid starting
+    // a capture for invalid paths.
+    let uri_str = match build_forward_uri(req.uri().path(), req.uri().query()) {
+        Ok(uri) => uri,
+        Err(status) => return status.into_response(),
+    };
+
     let router = match reg.ensure(&name, Instant::now()).await {
         Ok(r) => r,
         Err(e) => return serve_error(e),
     };
-
-    // Extract raw remainder from the request path (still percent-encoded).
-    let raw = raw_rest(req.uri().path()).unwrap_or_default();
-
-    // Reject any remainder with dot segments (path traversal protection).
-    if has_dot_segment(raw) {
-        return StatusCode::BAD_REQUEST.into_response();
-    }
-
-    // Build forwarded URI with raw-encoded remainder + original query.
-    let mut uri_str = format!("/{INNER_STREAM}/{}", raw);
-    if let Some(q) = req.uri().query() {
-        uri_str.push('?');
-        uri_str.push_str(q);
-    }
 
     match uri_str.parse() {
         Ok(u) => *req.uri_mut() = u,
@@ -139,6 +150,21 @@ mod tests {
         (
             axum::Router::new().nest("/hls", hls_router(reg.clone())),
             reg,
+        )
+    }
+
+    fn app_with_counts(
+        streams: &[(&str, &str)],
+    ) -> (
+        axum::Router,
+        Arc<Registry>,
+        Arc<crate::registry::tests::Counts>,
+    ) {
+        let (reg, counts, _) = setup(streams);
+        (
+            axum::Router::new().nest("/hls", hls_router(reg.clone())),
+            reg,
+            counts,
         )
     }
 
@@ -207,49 +233,41 @@ mod tests {
 
     #[test]
     fn forward_path_with_query_preserved() {
-        // Normal path with query
-        let req = Request::builder()
-            .uri("/medium/media.m3u8?_HLS_msn=12&_HLS_part=3")
-            .body(Body::empty())
-            .unwrap();
-        let raw = raw_rest(req.uri().path()).unwrap();
-        assert_eq!(raw, "media.m3u8");
-        assert_eq!(req.uri().query(), Some("_HLS_msn=12&_HLS_part=3"));
-        let mut uri_str = format!("/{INNER_STREAM}/{}", raw);
-        if let Some(q) = req.uri().query() {
-            uri_str.push('?');
-            uri_str.push_str(q);
-        }
-        assert_eq!(uri_str, "/s/media.m3u8?_HLS_msn=12&_HLS_part=3");
+        // Normal path with query: calls production build_forward_uri
+        assert_eq!(
+            build_forward_uri("/medium/media.m3u8", Some("_HLS_msn=12&_HLS_part=3")),
+            Ok("/s/media.m3u8?_HLS_msn=12&_HLS_part=3".to_string())
+        );
     }
 
     #[test]
     fn forward_path_encoding_preserved() {
         // Percent-encoded ? is preserved, not decoded to actual query
-        let req = Request::builder()
-            .uri("/main/foo%3Fx=1")
-            .body(Body::empty())
-            .unwrap();
-        let raw = raw_rest(req.uri().path()).unwrap();
-        assert_eq!(raw, "foo%3Fx=1");
-        let mut uri_str = format!("/{INNER_STREAM}/{}", raw);
-        if let Some(q) = req.uri().query() {
-            uri_str.push('?');
-            uri_str.push_str(q);
-        }
-        assert_eq!(uri_str, "/s/foo%3Fx=1");
+        assert_eq!(
+            build_forward_uri("/main/foo%3Fx=1", None),
+            Ok("/s/foo%3Fx=1".to_string())
+        );
     }
 
     #[test]
     fn forward_segment_names() {
-        let req = Request::builder()
-            .uri("/main/seg-1-2.m4s")
-            .body(Body::empty())
-            .unwrap();
-        let raw = raw_rest(req.uri().path()).unwrap();
-        assert_eq!(raw, "seg-1-2.m4s");
-        let uri_str = format!("/{INNER_STREAM}/{}", raw);
-        assert_eq!(uri_str, "/s/seg-1-2.m4s");
+        assert_eq!(
+            build_forward_uri("/main/seg-1-2.m4s", None),
+            Ok("/s/seg-1-2.m4s".to_string())
+        );
+    }
+
+    #[test]
+    fn forward_rejects_dot_segments() {
+        // Dot segments rejected at build time, before capture starts
+        assert_eq!(
+            build_forward_uri("/main/%2e%2e/x", None),
+            Err(StatusCode::BAD_REQUEST)
+        );
+        assert_eq!(
+            build_forward_uri("/main/../x", None),
+            Err(StatusCode::BAD_REQUEST)
+        );
     }
 
     #[tokio::test]
@@ -278,15 +296,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dot_segment_in_path_rejected() {
-        let (app, _) = app(&[("main", "ACC_Medium")]);
+    async fn dot_segment_in_path_rejected_without_starting_capture() {
+        let (app, _, counts) = app_with_counts(&[("medium", "ACC_Medium")]);
+        assert_eq!(counts.started.load(std::sync::atomic::Ordering::SeqCst), 0);
         assert_eq!(
-            get(&app, "/hls/main/%2e%2e/x").await.status(),
+            get(&app, "/hls/medium/%2e%2e/x").await.status(),
             StatusCode::BAD_REQUEST
         );
-        assert_eq!(
-            get(&app, "/hls/main/../x").await.status(),
-            StatusCode::BAD_REQUEST
-        );
+        // Capture was not started due to early validation
+        assert_eq!(counts.started.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 }
