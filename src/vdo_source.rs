@@ -95,7 +95,9 @@
 
 use std::collections::VecDeque;
 use std::convert::Infallible;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use broadcast_common::{Demand, Stage, Timestamp};
 use media_plane::ingress::{IngestSession, ProgramId, SessionEvent};
@@ -118,14 +120,8 @@ const PROGRAM: ProgramId = ProgramId(0);
 /// Media/track timescale for both H.264 and H.265 (90 kHz video clock).
 const CLOCK_RATE: u32 = 90_000;
 
-/// How many VDO buffers to read, at most, while resolving the codec's full
-/// parameter-set run (SPS/PPS for H.264; VPS/SPS/PPS for H.265) needed to
-/// build the `TrackSpec`/`avcC`/`hvcC`. The parameter sets ride in the
-/// key-frame buffer's header (see [`scan_for_param_sets`]), so the very first
-/// key frame normally resolves them; the bound spans a generous multi-GOP
-/// window to tolerate a mid-GOP start (and the separate-parameter-set-buffer
-/// fallback) while avoiding blocking forever on a stream that never keys.
-const PARAM_SET_SCAN_LIMIT: usize = 150;
+/// How often `scan_for_param_sets` logs that it is still waiting for a key frame.
+const SCAN_WARN_INTERVAL: Duration = Duration::from_secs(10);
 
 /// The first IDR access unit found while collecting parameter sets, held onto
 /// so it can be delivered as the first real sample instead of being dropped.
@@ -202,11 +198,11 @@ impl VdoIngestSession {
     /// # Errors
     /// Returns [`OriginError::Vdo`] if the stream can't be built/started or a
     /// buffer read fails while scanning for parameter sets, and
-    /// [`OriginError::Convert`] if no complete parameter-set run turns up
-    /// within [`PARAM_SET_SCAN_LIMIT`] buffers, or the parameter sets found
+    /// [`OriginError::Convert`] if `stop` is set while still waiting for a key
+    /// frame (the scan has no buffer limit), or the parameter sets found
     /// don't decode into a valid `TrackSpec` (propagated from
     /// [`convert::track_spec`]).
-    pub fn new(settings: &crate::profile::CaptureSettings) -> Result<Self> {
+    pub fn new(settings: &crate::profile::CaptureSettings, stop: &AtomicBool) -> Result<Self> {
         let crate::profile::CaptureSettings {
             codec,
             channel,
@@ -220,27 +216,24 @@ impl VdoIngestSession {
             Codec::H265 => VdoFormat::VDO_FORMAT_H265,
         };
 
-        // Force a ~1-second GOP so key frames — and the SPS/PPS/VPS parameter
-        // sets VDO emits ahead of each one, as their own buffers — recur
-        // predictably. Without this, a camera in dynamic-GOP / Zipstream mode
-        // can go many seconds between key frames, so `scan_for_param_sets`
-        // finds no parameter-set run within its bounded window (observed on
-        // ARTPEC-6 / firmware 11, #669). Falls back to 30 if the caller left
-        // framerate at 0 (camera default) rather than forcing a key frame every
-        // frame.
-        let gop_length = gop_length.unwrap_or(if framerate > 0 { framerate } else { 30 });
-
-        let stream = StreamBuilder::new()
+        // Only set a GOP length when the profile asks for one. Any explicit GOP
+        // caps 4K throughput at ~18 fps on ARTPEC-6 (the camera default gives
+        // 25 fps), so otherwise the camera default stands and
+        // `scan_for_param_sets` simply waits for the next key frame, however
+        // far off dynamic GOP / Zipstream puts it (#669).
+        let mut builder = StreamBuilder::new()
             .channel(channel)
             .format(format)
             .resolution(Resolution::Exact { width, height })
-            .framerate(framerate)
-            .gop_length(gop_length)
-            .build()?;
+            .framerate(framerate);
+        if let Some(gop) = gop_length {
+            builder = builder.gop_length(gop);
+        }
+        let stream = builder.build()?;
 
         let running = stream.start()?;
 
-        let (params, pending_first) = scan_for_param_sets(&running, codec)?;
+        let (params, pending_first) = scan_for_param_sets(&running, codec, stop)?;
         let spec = convert::track_spec(codec, &params, TRACK_ID, CLOCK_RATE)?;
 
         Ok(Self {
@@ -323,7 +316,9 @@ impl VdoIngestSession {
 
 /// Read buffers from `running` until the parameter sets (SPS/PPS for H.264;
 /// VPS/SPS/PPS for H.265) can be resolved, returning them plus the key-frame
-/// access unit as a [`PendingAu`].
+/// access unit as a [`PendingAu`]. There is no buffer limit: it waits as long
+/// as the camera takes to produce a key frame, warning every
+/// [`SCAN_WARN_INTERVAL`], and fails only on a read error or once `stop` is set.
 ///
 /// Where VDO puts the parameter sets (verified on hardware, ARTPEC-6/H.264,
 /// #669): they are carried in the **key-frame buffer's header** — the bytes
@@ -335,15 +330,34 @@ impl VdoIngestSession {
 /// (frame types `VDO_FRAME_TYPE_H264_SPS`/`_PPS`, …), those are also collected
 /// and tried. The sample handed on for the key frame is the header-stripped
 /// `data_copy()` (parameter sets ride in the `avcC`/`hvcC` init, not samples).
-fn scan_for_param_sets(running: &RunningStream, codec: Codec) -> Result<(ParamSets, PendingAu)> {
+fn scan_for_param_sets(
+    running: &RunningStream,
+    codec: Codec,
+    stop: &AtomicBool,
+) -> Result<(ParamSets, PendingAu)> {
     // Fallback path: latest Annex B bytes for each separately-delivered
     // parameter-set NAL, kept individually so a resent run replaces it.
     let mut vps: Option<Vec<u8>> = None; // H.265 only
     let mut sps: Option<Vec<u8>> = None;
     let mut pps: Option<Vec<u8>> = None;
 
-    for i in 0..PARAM_SET_SCAN_LIMIT {
+    let started = Instant::now();
+    let mut last_warn = started;
+    for i in 0usize.. {
         let buf = running.next_buffer()?;
+        if stop.load(Ordering::Relaxed) {
+            return Err(OriginError::Convert(
+                "capture stopped while waiting for a key frame".into(),
+            ));
+        }
+        if last_warn.elapsed() >= SCAN_WARN_INTERVAL {
+            last_warn = Instant::now();
+            log::warn!(
+                "vdo scan: still waiting for a key frame after {}s ({} buffers seen)",
+                started.elapsed().as_secs(),
+                i + 1,
+            );
+        }
         let ft = buf.frame_type();
         let data = buf.data_copy()?;
         if let Some(kind) = param_set_kind(codec, ft) {
@@ -399,9 +413,7 @@ fn scan_for_param_sets(running: &RunningStream, codec: Codec) -> Result<(ParamSe
         }
         // non-key pictures / SEI while scanning: dropped
     }
-    Err(OriginError::Convert(format!(
-        "no complete {codec:?} parameter-set run found in the first {PARAM_SET_SCAN_LIMIT} VDO buffers"
-    )))
+    unreachable!("the scan loop only exits by returning")
 }
 
 /// Which parameter-set NAL a VDO parameter-set frame type carries.

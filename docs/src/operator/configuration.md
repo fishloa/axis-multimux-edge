@@ -198,8 +198,8 @@ A `POST /admin/config` is rejected with `400 Bad Request` if:
 A missing or unavailable profile shows up later as a 503 `camera profile "X" not found`
 or `profile source unavailable: …` error when a stream URL is accessed.
 
-> **Known limitation:** on the P1448-LE (ARTPEC-6, AXIS OS 11.11), streams captured through the app ran at
-~16-19 fps at 4K and ~19 fps at 1080p, while 720p ran at 25 fps and the camera's
-own RTSP gives 25 fps at 4K. Under investigation; suspected causes are the app's
-forced 1-second key-frame interval and profile compression/bitrate settings not
-being applied.
+> **Known limitation:** on the P1448-LE (ARTPEC-6, AXIS OS 11.11), setting any
+explicit key-frame interval caps 4K capture at ~18 fps (the camera's default
+gives 25 fps, also over its own RTSP). The app no longer forces a key-frame
+interval; it only applies one when the stream profile sets
+`videokeyframeinterval`, so avoid setting it on 4K profiles.
