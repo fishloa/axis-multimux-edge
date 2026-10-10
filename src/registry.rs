@@ -178,6 +178,10 @@ impl Registry {
                 c.last_used = now;
                 return Ok(c.router.clone());
             }
+            // The VAPIX await above can take up to 5 s; stamp the new capture
+            // with the insert time (never earlier than the caller's `now`) so
+            // a short idle timeout cannot sweep it on the very next tick.
+            let stamp = now.max(Instant::now());
             let max = inner.config.max_encodes;
             let in_use = inner.captures.len() as u32;
             if in_use >= max {
@@ -212,8 +216,8 @@ impl Registry {
                     names,
                     router: router.clone(),
                     status,
-                    started_at: now,
-                    last_used: now,
+                    started_at: stamp,
+                    last_used: stamp,
                     _handle: handle,
                 },
             );
@@ -656,10 +660,11 @@ pub(crate) mod tests {
             .unwrap();
         reg.sweep(t0 + Duration::from_secs(29));
         assert_eq!(counts.stopped.load(Ordering::SeqCst), 0);
-        reg.sweep(t0 + Duration::from_secs(30));
-        assert_eq!(counts.stopped.load(Ordering::SeqCst), 1); // "hi" idle 30 s
+        // "hi" is stamped at insert time (>= t0), so use 31 s for a safe margin.
+        reg.sweep(t0 + Duration::from_secs(31));
+        assert_eq!(counts.stopped.load(Ordering::SeqCst), 1); // "hi" idle >= 30 s
         let _ = reg
-            .ensure("lo", t0 + Duration::from_secs(31))
+            .ensure("lo", t0 + Duration::from_secs(32))
             .await
             .unwrap(); // slot freed
     }

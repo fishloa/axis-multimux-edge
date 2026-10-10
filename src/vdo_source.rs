@@ -181,7 +181,18 @@ pub struct VdoIngestSession {
     initial_batch_sent: bool,
     /// Events ready for [`Stage::poll`] to hand back, in order.
     pending: VecDeque<SessionEvent>,
+    /// Diagnostic window (4K frame-rate investigation): buffers seen per VDO
+    /// frame type (including skipped non-picture ones), total buffers, and
+    /// min/max delta between consecutive buffer timestamps (microseconds).
+    diag_counts: Vec<(VdoFrameType, u32)>,
+    diag_buffers: u32,
+    diag_prev_ts_us: Option<u64>,
+    diag_min_delta_us: Option<u64>,
+    diag_max_delta_us: Option<u64>,
 }
+
+/// Buffers per diagnostic log line.
+const DIAG_WINDOW: u32 = 250;
 
 impl VdoIngestSession {
     /// Open the VDO channel described by `settings` (channel, size, framerate,
@@ -242,6 +253,11 @@ impl VdoIngestSession {
             pending_first: Some(pending_first),
             initial_batch_sent: false,
             pending: VecDeque::new(),
+            diag_counts: Vec::new(),
+            diag_buffers: 0,
+            diag_prev_ts_us: None,
+            diag_min_delta_us: None,
+            diag_max_delta_us: None,
         })
     }
 
@@ -257,13 +273,39 @@ impl VdoIngestSession {
                 .unwrap_or_else(PoisonError::into_inner)
                 .next_buffer()?;
             let ft = buf.frame_type();
+            let ts = buf.timestamp();
+            // Diagnostic counters (see the `diag_*` fields).
+            match self.diag_counts.iter_mut().find(|(t, _)| *t == ft) {
+                Some((_, n)) => *n += 1,
+                None => self.diag_counts.push((ft, 1)),
+            }
+            if let Some(prev) = self.diag_prev_ts_us {
+                let d = ts.abs_diff(prev);
+                self.diag_min_delta_us = Some(self.diag_min_delta_us.map_or(d, |m| m.min(d)));
+                self.diag_max_delta_us = Some(self.diag_max_delta_us.map_or(d, |m| m.max(d)));
+            }
+            self.diag_prev_ts_us = Some(ts);
+            self.diag_buffers += 1;
+            if self.diag_buffers >= DIAG_WINDOW {
+                log::info!(
+                    "vdo diag: {} buffers by type {:?}, ts delta us min={:?} max={:?}",
+                    self.diag_buffers,
+                    self.diag_counts,
+                    self.diag_min_delta_us,
+                    self.diag_max_delta_us,
+                );
+                self.diag_counts.clear();
+                self.diag_buffers = 0;
+                self.diag_min_delta_us = None;
+                self.diag_max_delta_us = None;
+            }
             if !is_picture(self.codec, ft) {
                 // non-key pictures / SEI while live: dropped, exactly as the
                 // scan loop drops them.
                 continue;
             }
             let data = buf.data_copy()?;
-            let timestamp_us = buf.timestamp();
+            let timestamp_us = ts;
             let is_sync = is_idr(self.codec, ft);
             let duration = convert::duration_ticks(
                 self.prev_ts_us.unwrap_or(timestamp_us),
