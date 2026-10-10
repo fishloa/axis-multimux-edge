@@ -125,6 +125,14 @@ a different framing, this assumption breaks. This is a code-level issue —
 see [Architecture](../contributor/architecture.md) for where `VdoIngestSession`
 does this conversion.
 
+## Low frame rate at 4K / 1080p
+
+> **Known limitation:** on the P1448-LE (ARTPEC-6, AXIS OS 11.11), streams captured through the app ran at
+~16-19 fps at 4K and ~19 fps at 1080p, while 720p ran at 25 fps and the camera's
+own RTSP gives 25 fps at 4K. Under investigation; suspected causes are the app's
+forced 1-second key-frame interval and profile compression/bitrate settings not
+being applied.
+
 ## Full verification checklist
 
 For the complete on-device acceptance checklist (used when verifying a

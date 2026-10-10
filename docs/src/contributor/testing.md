@@ -31,13 +31,15 @@ verified on a real ARTPEC-6/7/8/9 camera:
 
 1. The `.eap` installs and the app shows **running** in the camera's Apps
    list.
-2. `curl -u <user>:<pw> https://<cam>/local/multimuxedge/hls/cam/media.m3u8`
-   returns an LL-HLS media playlist (`#EXT-X-PART`, `#EXT-X-PART-INF`,
+2. `curl -u <user>:<pw> https://<cam>/local/multimuxedge/hls/media.m3u8`
+   (a 302 to the default stream, or `main`) or
+   `.../hls/main/media.m3u8` returns an LL-HLS media playlist (`#EXT-X-PART`, `#EXT-X-PART-INF`,
    `#EXT-X-SERVER-CONTROL`).
 3. A real LL-HLS player (Safari / hls.js / `ffplay`) plays **live** video via
    that URL at low latency.
-4. The admin settings page loads at `https://<cam>/local/multimuxedge/` and a
-   config change (e.g. `part_target_ms`) takes effect after a restart.
+4. The admin settings page loads at `https://<cam>/local/multimuxedge/index.html` (the bare
+   directory returns 401 on AXIS OS 11.11) and a config change (e.g.
+   `part_target_ms`) takes effect immediately.
 5. H.264 verified on all SoCs; H.265 verified additionally on
    ARTPEC-7/8/9 (see [Supported Devices](../operator/supported-devices.md)).
 

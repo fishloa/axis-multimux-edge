@@ -55,7 +55,7 @@ The configuration is a JSON object with the following top-level keys:
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `max_encodes` | integer | `2` | Maximum concurrent encodes (range 1–8). When the limit is reached, new stream requests receive a 503 response. The ARTPEC-6 (P1448-LE) camera handles about 2 distinct encodes at full frame rate; a `1 × 4K + 1 other` pair works well, but 3 or more will slow every stream to 15–18 fps. Other clients (e.g., a VMS) share this limit. |
+| `max_encodes` | integer | `2` | Maximum concurrent encodes (range 1–8). When the limit is reached, new stream requests receive a 503 response. The ARTPEC-6 (P1448-LE) camera handles about 2 distinct encodes; 3 or more will slow every stream to 15–18 fps (see Known limitation below). Other clients (e.g., a VMS) share this limit. |
 | `idle_timeout_secs` | integer | `30` | Seconds of inactivity after which an idle stream shuts down its encode (range 5–600). This frees encoder resources for other streams. |
 
 ### LL-HLS Parameters
@@ -197,3 +197,9 @@ A `POST /admin/config` is rejected with `400 Bad Request` if:
 **Note:** The app does NOT validate that a profile exists on the camera at config time.
 A missing or unavailable profile shows up later as a 503 `camera profile "X" not found`
 or `profile source unavailable: …` error when a stream URL is accessed.
+
+> **Known limitation:** on the P1448-LE (ARTPEC-6, AXIS OS 11.11), streams captured through the app ran at
+~16-19 fps at 4K and ~19 fps at 1080p, while 720p ran at 25 fps and the camera's
+own RTSP gives 25 fps at 4K. Under investigation; suspected causes are the app's
+forced 1-second key-frame interval and profile compression/bitrate settings not
+being applied.

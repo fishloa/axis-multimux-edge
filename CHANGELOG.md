@@ -5,6 +5,10 @@ here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Known limitation
+
+- on the P1448-LE (ARTPEC-6, AXIS OS 11.11), streams captured through the app ran at ~16-19 fps at 4K and ~19 fps at 1080p, while 720p ran at 25 fps and the camera's own RTSP gives 25 fps at 4K. Under investigation; suspected causes are the app's forced 1-second key-frame interval and profile compression/bitrate settings not being applied.
+
 ### Added
 
 - **Stream profiles.** Map URL names to the camera's own stream profiles

@@ -32,9 +32,11 @@ cargo-acap-sdk start   --host "$AXIS_DEVICE_IP" --user root --pass "$AXIS_DEVICE
 ## Verify the install
 
 1. The app shows **running** in the camera's Apps list.
-2. `curl -u <user>:<pw> https://<cam>/local/multimuxedge/hls/cam/media.m3u8`
-   returns an LL-HLS media playlist (look for `#EXT-X-PART`,
+2. `curl -u <user>:<pw> https://<cam>/local/multimuxedge/hls/media.m3u8`
+   (a 302 to the default stream, or `main`) or
+   `.../hls/main/media.m3u8` returns an LL-HLS media playlist (look for `#EXT-X-PART`,
    `#EXT-X-PART-INF`, `#EXT-X-SERVER-CONTROL`).
-3. The admin settings page loads at `https://<cam>/local/multimuxedge/`.
+3. The admin settings page loads at `https://<cam>/local/multimuxedge/index.html` (the bare directory
+   returns 401 on AXIS OS 11.11).
 
 If any of these fail, see [Troubleshooting](troubleshooting.md).
