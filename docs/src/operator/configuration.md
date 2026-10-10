@@ -49,7 +49,7 @@ The configuration is a JSON object with the following top-level keys:
 | `streams` | array | `[]` | List of named streams, each mapping a URL name to a camera profile. |
 | `streams[].name` | string | *(required)* | URL name for the stream: lowercase a–z, 0–9 and `-`, 1–32 chars, starting with a letter or digit. The reserved names `main` and `media.m3u8` cannot be used. Stream URLs appear at `/local/multimuxedge/hls/<name>/media.m3u8`. |
 | `streams[].profile` | string | *(required)* | Camera stream profile name (e.g., `ACC_Medium`, `ACC_High`). Query available profiles with `GET /admin/profiles`. |
-| `default_stream` | string | *(optional)* | Name of the stream to serve at the bare URL `/local/multimuxedge/hls/media.m3u8`. If not set, that URL returns a 404. |
+| `default_stream` | string | *(optional)* | Name of the stream to serve at the bare URL `/local/multimuxedge/hls/media.m3u8`. If not set, the bare URL redirects to `main` (the built-in main preset). |
 
 ### Encoder Limits
 
@@ -68,15 +68,19 @@ The configuration is a JSON object with the following top-level keys:
 
 ## Stream URLs
 
-Streams are served at `/local/multimuxedge/hls/<name>/media.m3u8`, where `<name>` is the
-stream's configured name. For example, a stream named `medium` is at:
+**Built-in main stream:** every camera always serves its main preset at
+`/local/multimuxedge/hls/main/media.m3u8`.
+
+**Named streams:** configured streams are served at `/local/multimuxedge/hls/<name>/media.m3u8`,
+where `<name>` is the stream's configured name. For example, a stream named `medium` is at:
 
 ```
 https://<cam>/local/multimuxedge/hls/medium/media.m3u8
 ```
 
-The bare URL `/local/multimuxedge/hls/media.m3u8` redirects (302, with query parameters preserved) to the
-`default_stream` if one is configured, otherwise returns a 404.
+**Bare URL:** `/local/multimuxedge/hls/media.m3u8` redirects (302, with query parameters preserved)
+to `/<default_stream>/media.m3u8` if a default stream is configured in the config; otherwise
+it redirects to `/main/media.m3u8`.
 
 ## Profile Keys
 
@@ -101,11 +105,41 @@ profile specifies for those. If a profile omits a key listed above, the correspo
 curl -u <user>:<pw> https://<cam>/local/multimuxedge/admin/profiles
 ```
 
-Returns a JSON array of available profile names, e.g.:
+Returns a profiles object, e.g.:
 
 ```json
-["ACC_High", "ACC_Medium", "ACC_Low", "MJPEG_High"]
+{
+  "profiles": [
+    {
+      "name": "ACC_High",
+      "description": "High quality H.264 stream",
+      "parameters": "videocodec=h264&resolution=1920x1080&fps=30&camera=0",
+      "settings": "h264 1920x1080@30 ch0",
+      "ignored_keys": ["compression", "bitrate", "audio"],
+      "error": null
+    },
+    {
+      "name": "ACC_Medium",
+      "description": "Medium quality H.264 stream",
+      "parameters": "videocodec=h264&resolution=1280x720&fps=25&camera=0",
+      "settings": "h264 1280x720@25 ch0",
+      "ignored_keys": ["compression", "bitrate", "audio"],
+      "error": null
+    }
+  ],
+  "error": null
+}
 ```
+
+Each profile object contains:
+- `name`: profile identifier (use in `streams[].profile`)
+- `description`: human-readable description
+- `parameters`: raw camera profile parameters
+- `settings`: the capture settings this app would use (e.g., codec/resolution/fps), or null if unusable
+- `ignored_keys`: profile keys this app cannot override (e.g., compression, bitrate, audio)
+- `error`: reason the profile cannot be captured, if any (e.g., unsupported codec)
+
+The top-level `error` is set if the camera's profile list itself could not be read.
 
 ### Read the current configuration
 
@@ -148,11 +182,18 @@ A validation error returns `400 Bad Request` with `{"errors":[{"field":"<name>",
 
 A `POST /admin/config` is rejected with `400 Bad Request` if:
 
-- `main.codec` is anything other than `"h264"` or `"h265"`.
-- `streams[].name` is invalid (not lowercase a–z, 0–9, `-`, or reserved).
-- `streams[].profile` refers to a profile that does not exist on the camera.
+- `main.codec` is not `"h264"` or `"h265"`.
+- `streams[].name` is not lowercase a–z, 0–9, and `-`, is too short or long, or starts with a digit.
+- `streams[].name` is a reserved name (`main` or `media.m3u8`).
+- `streams[].name` is used more than once (duplicates).
+- `streams[].profile` is empty.
+- `default_stream` names a stream that does not exist in the `streams` array.
 - `target_duration_secs` is `<= 0`.
-- `part_target_ms` is `0`.
-- `window_segments` is `0`.
+- `part_target_ms` is `<= 0`.
+- `window_segments` is `<= 0`.
 - `max_encodes` is outside the range 1–8.
 - `idle_timeout_secs` is outside the range 5–600.
+
+**Note:** The app does NOT validate that a profile exists on the camera at config time.
+A missing or unavailable profile shows up later as a 503 `camera profile "X" not found`
+or `profile source unavailable: …` error when a stream URL is accessed.
