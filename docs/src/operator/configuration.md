@@ -91,11 +91,11 @@ Stream profiles can override these keys from the main capture settings:
 | `videocodec` | string | `"h264"` or `"h265"` to override the main codec. |
 | `resolution` | string | Width × height, e.g., `"1280x720"`, to override width/height. |
 | `fps` | integer | Frames per second to override the main framerate. If omitted or 0, the camera's default fps is used. |
-| `camera` | integer | VDO channel index to override the main channel. |
+| `camera` | integer | VDO channel index. If omitted, camera 1 is used (the VAPIX default, the same video the camera's own RTSP server sends for that profile), not the main channel. |
 | `videokeyframeinterval` | integer | Keyframe interval; 0 means the camera default and is treated as unset. |
 
 All other profile keys (compression, bitrate, audio, etc.) are **ignored** — the stream will use whatever the
-profile specifies for those. If a profile omits a key listed above, the corresponding main setting is used.
+profile specifies for those. If a profile omits `videocodec` or `resolution`, the corresponding main setting is used.
 
 ## API
 
