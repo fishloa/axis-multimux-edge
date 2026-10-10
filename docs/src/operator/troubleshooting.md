@@ -17,35 +17,52 @@ Returns:
   },
   "streams": [
     {
-      "name": "medium",
-      "error": null
+      "names": ["medium"],
+      "settings": "h264 1280x720@25 ch0",
+      "state": "running",
+      "running": true,
+      "current_segment": 5,
+      "current_part": 2,
+      "frames": 1234,
+      "fps": 25.0,
+      "idle_secs": 0,
+      "last_error": null
     }
   ]
 }
 ```
 
+Interpret the response as follows:
+
 - `last_error` non-null — a config load or capture setup failure at boot
   (e.g., a broken `axparameter` backend). The text describes why.
 - `encodes.in_use >= encodes.max` — the encoder is at or over capacity.
   New stream requests will receive a 503.
-- `streams[].error` non-null — that stream has failed; the error text
-  describes why (profile not found, camera unavailable, etc.).
+- `streams` lists every active capture.
+  - `names` — stream names being served by this capture (may be multiple if
+    different streams map to the same profile).
+  - `settings` — capture codec, resolution, fps, and VDO channel, e.g. `h264 1280x720@25 ch0`.
+  - `state` — `starting`, `running`, or `error`.
+  - `last_error` — reason the stream failed, if any.
 
 ## Stream URLs
 
-Streams are accessed at `/local/multimuxedge/hls/<name>/media.m3u8`, where
-`<name>` is the configured stream name. For example:
+**Named streams:** `/local/multimuxedge/hls/<name>/media.m3u8` where `<name>` is
+the configured stream name. For example:
 
 ```
 https://<cam>/local/multimuxedge/hls/medium/media.m3u8
 ```
 
-The old URL path `/local/multimuxedge/hls/cam/media.m3u8` is no longer
-available. If you are migrating from an older version, update your clients
-to use the new stream names.
+**Main preset:** always available at `/local/multimuxedge/hls/main/media.m3u8`.
 
-The bare URL `/local/multimuxedge/hls/media.m3u8` redirects to the
-`default_stream` if configured, otherwise returns a 404.
+**Bare URL:** `/local/multimuxedge/hls/media.m3u8` always redirects (302) to either
+`/<default_stream>/media.m3u8` (if a default stream is set) or `/main/media.m3u8`
+(if no default stream is configured).
+
+The old URL path `/local/multimuxedge/hls/cam/media.m3u8` is no longer available.
+If you are migrating from an older version, update your clients to use the new
+stream names.
 
 ## Stream 503 (Service Unavailable)
 
@@ -75,17 +92,13 @@ curl -u <user>:<pw> https://<cam>/local/multimuxedge/admin/profiles
 
 Update the stream configuration to use a valid profile name.
 
-### `profile source unavailable: <reason>`
+### `profile source unavailable: <underlying message>`
 
-The camera's profile exists but cannot deliver video at the moment. Common
-reasons:
-
-- **`VDO channel not ready` or similar** — the VDO subsystem is initializing
-  or has failed. Wait a few seconds and retry.
-- **`Timeout waiting for keyframe`** — the camera is not producing frames
-  fast enough. Check the camera's health and network connectivity.
-
-If the issue persists, restart the Multimux Edge app.
+The camera's profile exists but cannot deliver video at the moment. The underlying message
+describes what failed: typically the camera's VAPIX profile service or the `streamprofile.cgi`
+call (which times out after 5 seconds if the camera is unresponsive). Wait a few seconds
+and retry. If the main stream is available, there is likely a temporary camera issue
+rather than a permanent codec/hardware incompatibility.
 
 ### Unsupported codec
 
