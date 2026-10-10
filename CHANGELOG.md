@@ -7,7 +7,7 @@ here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ### Known limitation
 
-- on the P1448-LE (ARTPEC-6, AXIS OS 11.11), streams captured through the app ran at ~16-19 fps at 4K and ~19 fps at 1080p, while 720p ran at 25 fps and the camera's own RTSP gives 25 fps at 4K. Under investigation; suspected causes are the app's forced 1-second key-frame interval and profile compression/bitrate settings not being applied.
+- on the P1448-LE (ARTPEC-6, AXIS OS 11.11), any explicit key-frame interval caps 4K capture at ~18 fps (camera default: 25 fps, also over its own RTSP). The app now only sets one when the stream profile sets `videokeyframeinterval`, so avoid setting it on 4K profiles.
 
 ### Added
 
@@ -31,6 +31,10 @@ here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 - **Breaking:** `GET /admin/status` now reports `encodes` and a `streams`
   list; the single-pipeline fields moved into each stream entry.
 - Config changes apply immediately; no restart.
+
+### Fixed
+
+- 4K streams no longer capped at ~18 fps: the app stopped forcing a 1-second GOP on VDO captures and instead waits for the first key frame, however long it takes (it logs a warning every 10 s, and stops promptly when the capture is stopped).
 
 ## [0.2.0] - 2026-10-05
 

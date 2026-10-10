@@ -270,7 +270,7 @@ async fn run_vdo_capture(
     if stop.load(Ordering::Relaxed) {
         return Ok(());
     }
-    let session = VdoIngestSession::new(settings).map_err(|e| MultimuxError::Connect {
+    let session = VdoIngestSession::new(settings, stop).map_err(|e| MultimuxError::Connect {
         reason: format!("VdoIngestSession init failed: {e}"),
     })?;
 
