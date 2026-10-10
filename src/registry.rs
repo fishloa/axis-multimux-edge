@@ -167,7 +167,9 @@ impl Registry {
                 return Err(ServeError::NotFound);
             }
             // `main` may have changed too; settings resolved from the old
-            // snapshot are stale, so resolve again (bounded).
+            // snapshot are stale, so resolve again (bounded). If `main` changes
+            // again during the 3rd attempt we proceed with that attempt's
+            // settings; the next `apply` reconciles.
             if inner.config.main != config.main && attempts < 3 {
                 continue;
             }
@@ -327,20 +329,6 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn concurrent_first_requests_start_exactly_one_capture() {
-        let (reg, counts, _) = setup(&[("medium", "ACC_Medium")]);
-        let now = Instant::now();
-        let futs = (0..8).map(|_| {
-            let reg = reg.clone();
-            tokio::spawn(async move { reg.ensure("medium", now).await.map(|_| ()) })
-        });
-        for f in futs {
-            f.await.unwrap().unwrap();
-        }
-        assert_eq!(counts.started.load(Ordering::SeqCst), 1);
-    }
-
-    #[tokio::test]
     async fn encode_cap_rejects_third_distinct_capture() {
         let (reg, counts, _) =
             setup(&[("hi", "ACC_High"), ("med", "ACC_Medium"), ("lo", "ACC_Low")]);
@@ -432,9 +420,27 @@ pub(crate) mod tests {
     }
 
     async fn wait_parked(src: &GatedProfileSource, n: usize) {
-        while src.arrived.load(Ordering::SeqCst) < n {
-            tokio::task::yield_now().await;
+        let wait = async {
+            while src.arrived.load(Ordering::SeqCst) < n {
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+        };
+        if tokio::time::timeout(std::time::Duration::from_secs(5), wait)
+            .await
+            .is_err()
+        {
+            panic!(
+                "expected {n} callers parked in list(), got {}",
+                src.arrived.load(Ordering::SeqCst)
+            );
         }
+    }
+
+    async fn join(t: Joined) -> Result<(), ServeError> {
+        tokio::time::timeout(std::time::Duration::from_secs(5), t)
+            .await
+            .expect("ensure task did not finish in 5s")
+            .unwrap()
     }
 
     type Joined = tokio::task::JoinHandle<Result<(), ServeError>>;
@@ -450,7 +456,7 @@ pub(crate) mod tests {
         wait_parked(&src, 8).await;
         src.gate.notify_waiters();
         for t in tasks {
-            t.await.unwrap().unwrap();
+            join(t).await.unwrap();
         }
         assert_eq!(counts.started.load(Ordering::SeqCst), 1);
     }
@@ -465,12 +471,12 @@ pub(crate) mod tests {
         let first = spawn_ensure(&reg, "hi");
         wait_parked(&src, 1).await;
         src.gate.notify_waiters();
-        first.await.unwrap().unwrap();
+        join(first).await.unwrap();
         let a = spawn_ensure(&reg, "med");
         let b = spawn_ensure(&reg, "lo");
         wait_parked(&src, 3).await;
         src.gate.notify_waiters();
-        let (ra, rb) = (a.await.unwrap(), b.await.unwrap());
+        let (ra, rb) = (join(a).await, join(b).await);
         let busy = |r: &Result<(), ServeError>| {
             matches!(r, Err(ServeError::EncoderBusy { in_use: 2, max: 2 }))
         };
@@ -491,7 +497,7 @@ pub(crate) mod tests {
             inner.config = cfg;
         }
         src.gate.notify_waiters();
-        assert_eq!(t.await.unwrap(), Err(ServeError::NotFound));
+        assert_eq!(join(t).await, Err(ServeError::NotFound));
         assert_eq!(counts.started.load(Ordering::SeqCst), 0);
     }
 
@@ -510,7 +516,7 @@ pub(crate) mod tests {
         // the retry parks in list() again
         wait_parked(&src, 2).await;
         src.gate.notify_waiters();
-        t.await.unwrap().unwrap();
+        join(t).await.unwrap();
         assert_eq!(counts.started.load(Ordering::SeqCst), 1);
         let inner = reg.inner.lock().unwrap();
         assert!(inner.captures.keys().all(|k| k.width == new_width));
