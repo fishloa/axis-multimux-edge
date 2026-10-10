@@ -17,16 +17,16 @@ read or change `multimux-edge`'s configuration.
 
 ## Local-only bind
 
-The app itself binds to `127.0.0.1:2999` (see [Configuration](configuration.md)'s
-`port` field) — it is not reachable directly on the network; all access goes
-through the camera's own web server and its VAPIX authentication, via the
-reverse-proxy paths above.
+The app always listens on `127.0.0.1:2999`. This is fixed (it is the
+manifest's `reverseProxy` target) and not configurable. It is not reachable
+from the network; all access goes through the camera's own web server and its
+VAPIX authentication, via the reverse-proxy paths above.
 
-## No live reconfiguration
+## Live reconfiguration
 
-Config changes only take effect on restart (see [Configuration](configuration.md)) —
-there is no live-reload code path an attacker with `admin` access could use
-to affect a running pipeline beyond what a restart itself does.
+Every setting applies immediately via `POST /admin/config` (see
+[Configuration](configuration.md)); no restart is needed. That endpoint is
+reachable only at the `admin` access level, behind the camera's reverse proxy.
 
 ## Reporting a vulnerability
 
