@@ -154,7 +154,7 @@ async fn main() {
         .merge(admin::admin_router(store, status));
     let app = axum::Router::new().nest(URL_PREFIX, inner);
 
-    let bind_addr = format!("127.0.0.1:{}", cfg.port);
+    let bind_addr = format!("127.0.0.1:{}", multimux_edge::config::APP_PORT);
     let listener = match tokio::net::TcpListener::bind(&bind_addr).await {
         Ok(listener) => listener,
         Err(e) => {
@@ -182,15 +182,15 @@ fn spawn_capture_pipeline(
     route_handle: Arc<RouteHandle>,
     status: StatusHandle,
 ) {
-    let codec = if cfg.codec == "h265" {
+    let codec = if cfg.main.codec == "h265" {
         Codec::H265
     } else {
         Codec::H264
     };
-    let channel = cfg.channel;
-    let width = cfg.width;
-    let height = cfg.height;
-    let framerate = cfg.framerate;
+    let channel = cfg.main.channel;
+    let width = cfg.main.width;
+    let height = cfg.main.height;
+    let framerate = cfg.main.framerate;
     let window_segments = cfg.window_segments;
 
     std::thread::spawn(move || {
