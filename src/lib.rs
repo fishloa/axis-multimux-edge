@@ -5,6 +5,7 @@
 //! and build only inside the Axis ACAP Native SDK.
 
 pub mod admin;
+pub mod config;
 pub mod convert;
 pub mod error;
 

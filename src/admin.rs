@@ -21,92 +21,7 @@ use axum::response::{IntoResponse, Json};
 use axum::routing::get;
 use serde::{Deserialize, Serialize};
 
-/// Default VDO channel index (single-sensor cameras use channel 0).
-const DEFAULT_CHANNEL: u32 = 0;
-/// Default capture width, pixels.
-const DEFAULT_WIDTH: u32 = 1920;
-/// Default capture height, pixels.
-const DEFAULT_HEIGHT: u32 = 1080;
-/// Default capture frame rate, fps.
-const DEFAULT_FRAMERATE: u32 = 30;
-/// Default codec: "h264" or "h265".
-const DEFAULT_CODEC: &str = "h264";
-/// Default LL-HLS target segment duration, seconds.
-const DEFAULT_TARGET_DURATION_SECS: f64 = 4.0;
-/// Default LL-HLS target part duration, milliseconds.
-const DEFAULT_PART_TARGET_MS: u32 = 500;
-/// Default number of segments kept in the LL-HLS media playlist window.
-const DEFAULT_WINDOW_SEGMENTS: usize = 8;
-/// Default HTTP bind port (the manifest's `reverseProxy` targets this).
-const DEFAULT_PORT: u16 = 2999;
-
-/// The app's persisted configuration: VDO capture parameters, the codec,
-/// LL-HLS tuning, and the HTTP bind port. Round-tripped through a
-/// [`ConfigStore`]; changes via `POST /admin/config` take effect on the next
-/// app restart (the running pipeline is not reconfigured live).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Config {
-    /// VDO channel index to capture from.
-    pub channel: u32,
-    /// Capture width, pixels.
-    pub width: u32,
-    /// Capture height, pixels.
-    pub height: u32,
-    /// Capture frame rate, fps.
-    pub framerate: u32,
-    /// Encoded video codec: `"h264"` or `"h265"`.
-    pub codec: String,
-    /// LL-HLS target segment duration, seconds.
-    pub target_duration_secs: f64,
-    /// LL-HLS target part duration, milliseconds.
-    pub part_target_ms: u32,
-    /// Number of segments kept in the LL-HLS media playlist window.
-    pub window_segments: usize,
-    /// HTTP bind port.
-    pub port: u16,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Config {
-            channel: DEFAULT_CHANNEL,
-            width: DEFAULT_WIDTH,
-            height: DEFAULT_HEIGHT,
-            framerate: DEFAULT_FRAMERATE,
-            codec: DEFAULT_CODEC.to_string(),
-            target_duration_secs: DEFAULT_TARGET_DURATION_SECS,
-            part_target_ms: DEFAULT_PART_TARGET_MS,
-            window_segments: DEFAULT_WINDOW_SEGMENTS,
-            port: DEFAULT_PORT,
-        }
-    }
-}
-
-impl Config {
-    /// Reject configs the pipeline/origin could not run with: an unknown
-    /// codec, or a non-positive timing/window/port value.
-    fn validate(&self) -> Result<(), String> {
-        if self.codec != "h264" && self.codec != "h265" {
-            return Err(format!(
-                "codec must be \"h264\" or \"h265\", got {:?}",
-                self.codec
-            ));
-        }
-        if self.target_duration_secs <= 0.0 {
-            return Err("target_duration_secs must be positive".to_string());
-        }
-        if self.part_target_ms == 0 {
-            return Err("part_target_ms must be positive".to_string());
-        }
-        if self.window_segments == 0 {
-            return Err("window_segments must be positive".to_string());
-        }
-        if self.port == 0 {
-            return Err("port must be positive".to_string());
-        }
-        Ok(())
-    }
-}
+pub use crate::config::Config;
 
 /// Outcome of [`ConfigStore::load`] — distinguishes "nothing has been
 /// stored yet" from "the backend itself is broken". Issue #955: the old
@@ -495,8 +410,12 @@ async fn post_config<S: ConfigStore>(
     State(state): State<AdminState<S>>,
     Json(cfg): Json<Config>,
 ) -> impl IntoResponse {
-    if let Err(reason) = cfg.validate() {
-        return (StatusCode::BAD_REQUEST, reason).into_response();
+    if let Err(errors) = cfg.validate() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "errors": errors })),
+        )
+            .into_response();
     }
     match state.store.store(&cfg) {
         Ok(()) => (
@@ -554,7 +473,10 @@ mod tests {
     #[tokio::test]
     async fn post_config_valid_returns_200() {
         let cfg = Config {
-            codec: "h265".to_string(),
+            main: crate::config::MainPreset {
+                codec: "h265".into(),
+                ..Default::default()
+            },
             ..Config::default()
         };
 
@@ -576,7 +498,10 @@ mod tests {
     #[tokio::test]
     async fn post_config_invalid_codec_returns_400() {
         let cfg = Config {
-            codec: "vp9".to_string(),
+            main: crate::config::MainPreset {
+                codec: "vp9".into(),
+                ..Default::default()
+            },
             ..Config::default()
         };
 
@@ -654,7 +579,10 @@ mod tests {
     #[test]
     fn parse_stored_parses_real_config_and_flags_garbage() {
         let cfg = Config {
-            codec: "h265".to_string(),
+            main: crate::config::MainPreset {
+                codec: "h265".into(),
+                ..Default::default()
+            },
             ..Config::default()
         };
         let s = serde_json::to_string(&cfg).unwrap();
@@ -709,7 +637,10 @@ mod tests {
     impl ConfigStore for StoredStore {
         fn load(&self) -> LoadOutcome {
             LoadOutcome::Stored(Config {
-                codec: "h265".to_string(),
+                main: crate::config::MainPreset {
+                    codec: "h265".into(),
+                    ..Default::default()
+                },
                 ..Config::default()
             })
         }
@@ -733,7 +664,7 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
         let cfg: Config = serde_json::from_value(body_json(response).await).unwrap();
-        assert_eq!(cfg.codec, "h265");
+        assert_eq!(cfg.main.codec, "h265");
     }
 
     #[tokio::test]
