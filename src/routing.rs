@@ -33,29 +33,63 @@ async fn bare(State(reg): State<Arc<Registry>>, req: Request) -> Response {
     (StatusCode::FOUND, [(header::LOCATION, location)]).into_response()
 }
 
-pub(crate) fn forward_uri(rest: &str, query: Option<&str>) -> String {
-    let mut uri = format!("/{INNER_STREAM}/{}", rest.trim_start_matches('/'));
-    if let Some(q) = query {
-        uri.push('?');
-        uri.push_str(q);
+/// Extract the raw (percent-encoded) remainder of the path after the stream name.
+/// Path from axum nest is `/{name}/{rest}` still encoded; returns the `rest` portion
+/// or None if there is no remainder.
+pub(crate) fn raw_rest(path: &str) -> Option<&str> {
+    let path = path.trim_start_matches('/');
+    let after_name = path.split_once('/')?;
+    Some(after_name.1)
+}
+
+/// Check if a raw (percent-encoded) path contains dot segments that could
+/// enable traversal: `.`, `..`, `%2e`, `%2e%2e`, `.%2e`, `%2e.` (case-insensitive).
+pub(crate) fn has_dot_segment(raw: &str) -> bool {
+    for segment in raw.split('/') {
+        let seg_lower = segment.to_lowercase();
+        if seg_lower == "."
+            || seg_lower == ".."
+            || seg_lower == "%2e"
+            || seg_lower == "%2e%2e"
+            || seg_lower == ".%2e"
+            || seg_lower == "%2e."
+        {
+            return true;
+        }
     }
-    uri
+    false
 }
 
 async fn forward(
     State(reg): State<Arc<Registry>>,
-    Path((name, rest)): Path<(String, String)>,
+    Path((name, _)): Path<(String, String)>,
     mut req: Request,
 ) -> Response {
     let router = match reg.ensure(&name, Instant::now()).await {
         Ok(r) => r,
         Err(e) => return serve_error(e),
     };
-    let uri = forward_uri(&rest, req.uri().query());
-    match uri.parse() {
+
+    // Extract raw remainder from the request path (still percent-encoded).
+    let raw = raw_rest(req.uri().path()).unwrap_or_default();
+
+    // Reject any remainder with dot segments (path traversal protection).
+    if has_dot_segment(raw) {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+
+    // Build forwarded URI with raw-encoded remainder + original query.
+    let mut uri_str = format!("/{INNER_STREAM}/{}", raw);
+    if let Some(q) = req.uri().query() {
+        uri_str.push('?');
+        uri_str.push_str(q);
+    }
+
+    match uri_str.parse() {
         Ok(u) => *req.uri_mut() = u,
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),
     }
+
     match router.oneshot(req).await {
         Ok(resp) => resp,
         Err(never) => match never {},
@@ -144,12 +178,78 @@ mod tests {
     }
 
     #[test]
-    fn forward_uri_keeps_query_and_rewrites_path() {
-        assert_eq!(
-            forward_uri("media.m3u8", Some("_HLS_msn=12&_HLS_part=3")),
-            "/s/media.m3u8?_HLS_msn=12&_HLS_part=3"
-        );
-        assert_eq!(forward_uri("/seg-1-2.m4s", None), "/s/seg-1-2.m4s");
+    fn raw_rest_extracts_remainder() {
+        assert_eq!(raw_rest("/medium/media.m3u8"), Some("media.m3u8"));
+        assert_eq!(raw_rest("/main/foo%3Fx=1"), Some("foo%3Fx=1"));
+        assert_eq!(raw_rest("/main/seg-1-2.m4s"), Some("seg-1-2.m4s"));
+        assert_eq!(raw_rest("/medium/"), Some(""));
+        assert_eq!(raw_rest("/medium"), None);
+    }
+
+    #[test]
+    fn has_dot_segment_detects_traversal() {
+        assert!(!has_dot_segment("media.m3u8"));
+        assert!(!has_dot_segment("foo%3Fx=1"));
+        assert!(!has_dot_segment("seg-1-2.m4s"));
+        assert!(has_dot_segment(".."));
+        assert!(has_dot_segment("."));
+        assert!(has_dot_segment("%2e%2e"));
+        assert!(has_dot_segment("%2e"));
+        assert!(has_dot_segment(".%2e"));
+        assert!(has_dot_segment("%2e."));
+        // Case-insensitive
+        assert!(has_dot_segment("%2E%2E"));
+        assert!(has_dot_segment("%2E"));
+        // In segments
+        assert!(has_dot_segment("foo/../bar"));
+        assert!(has_dot_segment("foo/./bar"));
+    }
+
+    #[test]
+    fn forward_path_with_query_preserved() {
+        // Normal path with query
+        let req = Request::builder()
+            .uri("/medium/media.m3u8?_HLS_msn=12&_HLS_part=3")
+            .body(Body::empty())
+            .unwrap();
+        let raw = raw_rest(req.uri().path()).unwrap();
+        assert_eq!(raw, "media.m3u8");
+        assert_eq!(req.uri().query(), Some("_HLS_msn=12&_HLS_part=3"));
+        let mut uri_str = format!("/{INNER_STREAM}/{}", raw);
+        if let Some(q) = req.uri().query() {
+            uri_str.push('?');
+            uri_str.push_str(q);
+        }
+        assert_eq!(uri_str, "/s/media.m3u8?_HLS_msn=12&_HLS_part=3");
+    }
+
+    #[test]
+    fn forward_path_encoding_preserved() {
+        // Percent-encoded ? is preserved, not decoded to actual query
+        let req = Request::builder()
+            .uri("/main/foo%3Fx=1")
+            .body(Body::empty())
+            .unwrap();
+        let raw = raw_rest(req.uri().path()).unwrap();
+        assert_eq!(raw, "foo%3Fx=1");
+        let mut uri_str = format!("/{INNER_STREAM}/{}", raw);
+        if let Some(q) = req.uri().query() {
+            uri_str.push('?');
+            uri_str.push_str(q);
+        }
+        assert_eq!(uri_str, "/s/foo%3Fx=1");
+    }
+
+    #[test]
+    fn forward_segment_names() {
+        let req = Request::builder()
+            .uri("/main/seg-1-2.m4s")
+            .body(Body::empty())
+            .unwrap();
+        let raw = raw_rest(req.uri().path()).unwrap();
+        assert_eq!(raw, "seg-1-2.m4s");
+        let uri_str = format!("/{INNER_STREAM}/{}", raw);
+        assert_eq!(uri_str, "/s/seg-1-2.m4s");
     }
 
     #[tokio::test]
@@ -175,5 +275,18 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(&body[..], b"camera profile \"Deleted\" not found");
+    }
+
+    #[tokio::test]
+    async fn dot_segment_in_path_rejected() {
+        let (app, _) = app(&[("main", "ACC_Medium")]);
+        assert_eq!(
+            get(&app, "/hls/main/%2e%2e/x").await.status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            get(&app, "/hls/main/../x").await.status(),
+            StatusCode::BAD_REQUEST
+        );
     }
 }
