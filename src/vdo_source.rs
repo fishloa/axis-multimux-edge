@@ -395,7 +395,10 @@ fn scan_for_param_sets(
             let full = buf.as_slice()?;
             let full_au = &full[..buf.size().min(full.len())];
             if let Some(params) = convert::extract_param_sets(codec, full_au) {
-                log::info!("vdo scan: parameter sets from key-frame header at buf[{i}]");
+                log::info!(
+                    "vdo scan: parameter sets from key-frame header at buf[{i}] ({ft:?}, {} ms)",
+                    started.elapsed().as_millis()
+                );
                 return Ok((
                     params,
                     PendingAu {
@@ -417,7 +420,10 @@ fn scan_for_param_sets(
                 blob.extend_from_slice(p);
             }
             if let Some(params) = convert::extract_param_sets(codec, &blob) {
-                log::info!("vdo scan: parameter sets from separate buffers, IDR at buf[{i}]");
+                log::info!(
+                    "vdo scan: parameter sets from separate buffers, IDR at buf[{i}] ({ft:?}, {} ms)",
+                    started.elapsed().as_millis()
+                );
                 return Ok((
                     params,
                     PendingAu {
