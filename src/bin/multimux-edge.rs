@@ -1,17 +1,20 @@
 //! ACAP entrypoint (`device`-gated; only builds inside the Axis ACAP Native
-//! SDK sysroot). Wires the real capture -> LL-HLS pipeline together:
+//! SDK sysroot). Wires the on-demand stream-profile -> LL-HLS pipeline together:
 //!
 //! - Loads [`multimux_edge::admin::Config`] from the ACAP
 //!   `axparameter`-backed [`multimux_edge::admin::AxParameterStore`].
-//! - Builds a [`multimux::RouteHandle`] sized from the config's LL-HLS
-//!   tuning (target segment duration / part target / window).
-//! - Starts [`multimux_edge::vdo_source::VdoIngestSession`] and drives it
-//!   through [`multimux::supervise_driver`]/[`multimux::source::advance_route`]
-//!   on a **dedicated OS thread with its own current-thread tokio runtime** —
+//! - Builds a [`multimux_edge::registry::Registry`] that maps operator-chosen
+//!   stream names to camera stream profiles and starts a capture per distinct
+//!   [`multimux_edge::profile::CaptureSettings`] on first request, stopping it
+//!   when idle or unmapped. The registry starts captures through
+//!   [`VdoCaptureFactory`], which drives
+//!   [`multimux_edge::vdo_source::VdoIngestSession`] through
+//!   [`multimux::supervise_driver`]/[`multimux::source::advance_route`] on a
+//!   **dedicated OS thread with its own current-thread tokio runtime** —
 //!   see "Threading" below.
-//! - Serves the LL-HLS origin (`multimux::origin::router`) nested under
-//!   `/hls`, merged with the admin config/status routes
-//!   (`multimux_edge::admin::admin_router`), on `127.0.0.1:<port>` (matching
+//! - Serves the LL-HLS origin ([`multimux_edge::routing::hls_router`]) nested
+//!   under `/hls`, merged with the admin config/status routes
+//!   ([`multimux_edge::admin::admin_router`]), on `127.0.0.1:<port>` (matching
 //!   `manifest.json`'s `reverseProxy` targets).
 //!
 //! # Threading
@@ -22,8 +25,8 @@
 //! (see `vdo_source.rs`'s module doc). Running that on an axum worker thread
 //! would eventually starve every request being served on the same
 //! `rt-multi-thread` runtime once all worker threads happen to be parked in
-//! that blocking call. Instead the whole capture/segment/store pipeline runs
-//! on a plain `std::thread::spawn`'d OS thread with its own
+//! that blocking call. Instead each capture's whole capture/segment/store
+//! pipeline runs on a plain `std::thread::spawn`'d OS thread with its own
 //! `current_thread` tokio runtime — the blocking call only ever stalls that
 //! one dedicated thread, never axum's.
 //!
@@ -39,28 +42,26 @@
 //! it with backoff on failure, and [`multimux::source::advance_route`] is
 //! the one facade call inside it that both publishes the driver-minted
 //! `Trunk` into the route and turns queued samples into servable segments.
-use std::collections::HashMap;
+//! One supervised capture runs per distinct settings, started by the
+//! registry; dropping its [`CaptureHandle`] cancels the supervisor and sets
+//! the stop flag so the capture loop returns and frees the VDO stream.
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
 use broadcast_common::Timestamp;
 use log::{error, info};
 use media_plane::ingress::{HandshakePolicy, IngestDriver};
 use media_plane::trunk::TrunkConfig;
-use multimux::origin::AppState;
-use multimux::output::{Output, OutputKind};
 use multimux::source::{DriverProgress, advance_route};
 use multimux::{Backoff, MultimuxError, RouteHandle};
 use multimux_edge::admin::{self, AxParameterStore, ConfigStore, StatusHandle};
-use multimux_edge::convert::Codec;
+use multimux_edge::profile::CaptureSettings;
+use multimux_edge::profile_source::VapixProfileSource;
+use multimux_edge::registry::{CaptureFactory, CaptureHandle, Registry};
+use multimux_edge::routing;
 use multimux_edge::vdo_source::VdoIngestSession;
 use tokio_util::sync::CancellationToken;
-
-/// The single served stream's name in LL-HLS URLs
-/// (`…/hls/<STREAM_NAME>/media.m3u8`) — this app captures exactly one VDO
-/// channel per `Config`, so one fixed stream name is enough. Also doubles as
-/// the route name `supervise_driver` logs/labels metrics under.
-const STREAM_NAME: &str = "cam";
 
 /// The URL prefix AXIS OS's Apache reverse proxy forwards verbatim to this
 /// app — `/local/<appName>` with `appName` from `manifest.json`
@@ -124,22 +125,13 @@ async fn main() {
     let cfg = outcome.into_config();
     info!("multimux-edge: loaded config: {cfg:?}");
 
-    let route_handle = Arc::new(RouteHandle::new(
-        cfg.target_duration_secs,
-        cfg.part_target_ms,
-        cfg.window_segments,
+    #[allow(clippy::arc_with_non_send_sync)]
+    let registry = Arc::new(Registry::new(
+        cfg,
+        Arc::new(VdoCaptureFactory),
+        Arc::new(VapixProfileSource::new()),
     ));
-
-    spawn_capture_pipeline(&cfg, route_handle.clone(), status.clone());
-
-    // `Config` carries no configurable playlist filename, so this app serves
-    // LL-HLS's default media playlist name (`llhls::DEFAULT_PLAYLIST_NAME`,
-    // `media.m3u8`) — matching the relative-URI playlists documented below
-    // (`/local/multimuxedge/hls/<stream>/media.m3u8`).
-    let outputs: Vec<Arc<dyn Output>> = vec![OutputKind::LlHls.build()];
-    let mut streams = HashMap::new();
-    streams.insert(STREAM_NAME.to_string(), (route_handle, outputs));
-    let app_state = Arc::new(AppState::new(streams));
+    registry.spawn_sweeper();
 
     // AXIS OS's Apache reverse proxy forwards the FULL request path to the
     // target verbatim — it does NOT strip the `/local/<appName>/<apiPath>`
@@ -150,8 +142,8 @@ async fn main() {
     // `/local/multimuxedge/admin/…`. The origin's playlists use relative URIs
     // (`media.m3u8`, `seg-*.m4s`), which resolve correctly under the prefix.
     let inner = axum::Router::new()
-        .nest("/hls", multimux::origin::router(app_state))
-        .merge(admin::admin_router(store, status));
+        .nest("/hls", routing::hls_router(registry.clone()))
+        .merge(admin::admin_router(store, status, registry));
     let app = axum::Router::new().nest(URL_PREFIX, inner);
 
     let bind_addr = format!("127.0.0.1:{}", multimux_edge::config::APP_PORT);
@@ -170,92 +162,68 @@ async fn main() {
     }
 }
 
-/// Start the VDO capture -> LL-HLS segmentation pipeline on its own OS thread
-/// with its own `current_thread` tokio runtime (see the module doc's
-/// "Threading" section): [`multimux::supervise_driver`] driving
-/// [`run_vdo_capture`], forever, retrying with backoff on failure. Never
-/// cancelled (the `CancellationToken` is never triggered) — this app has no
-/// graceful shutdown concept today, matching the pre-port behaviour (the process was
-/// simply killed to stop it).
-fn spawn_capture_pipeline(
-    cfg: &admin::Config,
-    route_handle: Arc<RouteHandle>,
-    status: StatusHandle,
-) {
-    let codec = if cfg.main.codec == "h265" {
-        Codec::H265
-    } else {
-        Codec::H264
-    };
-    let channel = cfg.main.channel;
-    let width = cfg.main.width;
-    let height = cfg.main.height;
-    let framerate = cfg.main.framerate;
-    let window_segments = cfg.window_segments;
-
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("build current-thread runtime for the VDO capture pipeline");
-        rt.block_on(async move {
-            // Never cancelled: this app has no graceful shutdown (see above).
-            let cancel = CancellationToken::new();
-            supervise_driver_forever(
-                codec,
-                channel,
-                width,
-                height,
-                framerate,
-                window_segments,
-                status,
-                route_handle,
-                cancel,
-            )
-            .await;
-        });
-    });
+/// One VDO capture on its own OS thread + current-thread runtime (see the
+/// module doc's "Threading" section). Dropping the handle stops it: the
+/// capture loop checks `stop` after every frame and `supervise_driver`
+/// is cancelled via its `CancellationToken`. Drop runs under the registry's
+/// lock, so it only signals — it never joins the thread or blocks.
+struct VdoCapture {
+    stop: Arc<AtomicBool>,
+    cancel: CancellationToken,
 }
 
-/// Wraps [`multimux::supervise_driver`] over [`run_vdo_capture`] — pulled out
-/// of [`spawn_capture_pipeline`] only so the parameters `run_vdo_capture`'s
-/// closure captures are named once, not because this does anything
-/// `supervise_driver` doesn't already do on its own.
-#[allow(clippy::too_many_arguments)]
-async fn supervise_driver_forever(
-    codec: Codec,
-    channel: u32,
-    width: u32,
-    height: u32,
-    framerate: u32,
-    window_segments: usize,
-    status: StatusHandle,
-    route_handle: Arc<RouteHandle>,
-    cancel: CancellationToken,
-) {
-    multimux::supervise_driver(
-        move |route_handle| {
-            let status = status.clone();
-            async move {
-                run_vdo_capture(
-                    codec,
-                    channel,
-                    width,
-                    height,
-                    framerate,
-                    window_segments,
-                    &status,
-                    &route_handle,
-                )
-                .await
-            }
-        },
-        route_handle,
-        Backoff::production_default(),
-        STREAM_NAME.to_string(),
-        cancel,
-    )
-    .await;
+impl CaptureHandle for VdoCapture {}
+
+impl Drop for VdoCapture {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        self.cancel.cancel();
+    }
+}
+
+/// Starts one [`VdoCapture`] per distinct [`CaptureSettings`] on behalf of the
+/// registry.
+struct VdoCaptureFactory;
+
+impl CaptureFactory for VdoCaptureFactory {
+    fn start(
+        &self,
+        settings: CaptureSettings,
+        route: Arc<RouteHandle>,
+        status: StatusHandle,
+        window_segments: usize,
+        label: String,
+    ) -> Box<dyn CaptureHandle> {
+        let stop = Arc::new(AtomicBool::new(false));
+        let cancel = CancellationToken::new();
+        let thread_cancel = cancel.clone();
+        let thread_stop = stop.clone();
+        info!(
+            "multimux-edge: starting capture {label}: {}",
+            settings.describe()
+        );
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("build current-thread runtime for a VDO capture");
+            rt.block_on(multimux::supervise_driver(
+                move |route_handle| {
+                    let status = status.clone();
+                    let stop = thread_stop.clone();
+                    async move {
+                        run_vdo_capture(&settings, window_segments, &status, &route_handle, &stop)
+                            .await
+                    }
+                },
+                route,
+                Backoff::production_default(),
+                label,
+                thread_cancel,
+            ));
+        });
+        Box::new(VdoCapture { stop, cancel })
+    }
 }
 
 /// One VDO-capture attempt — the closure [`multimux::supervise_driver`]
@@ -263,24 +231,20 @@ async fn supervise_driver_forever(
 /// ([`VdoIngestSession::new`]), wraps it in an
 /// [`media_plane::ingress::IngestDriver`] (no `Dialer`: see `vdo_source`'s
 /// own doc for why VDO drives directly), then loops `feed`/`advance_route`
-/// forever — each `feed` blocks on the next VDO buffer (see `vdo_source`'s
-/// module doc's "Threading" section) — until the session's health leaves
+/// — each `feed` blocks on the next VDO buffer (see `vdo_source`'s
+/// module doc's "Threading" section) — until `stop` is set (the capture was
+/// dropped: idle or unmapped; returns `Ok(())`) or the session's health leaves
 /// [`media_plane::ingress::HealthState::is_running`] (a VDO read/convert
 /// failure; a live camera channel has no natural clean end).
 async fn run_vdo_capture(
-    codec: Codec,
-    channel: u32,
-    width: u32,
-    height: u32,
-    framerate: u32,
+    settings: &CaptureSettings,
     window_segments: usize,
     status: &StatusHandle,
     route_handle: &RouteHandle,
+    stop: &AtomicBool,
 ) -> multimux::Result<()> {
-    let session = VdoIngestSession::new(codec, channel, width, height, framerate).map_err(|e| {
-        MultimuxError::Connect {
-            reason: format!("VdoIngestSession init failed: {e}"),
-        }
+    let session = VdoIngestSession::new(settings).map_err(|e| MultimuxError::Connect {
+        reason: format!("VdoIngestSession init failed: {e}"),
     })?;
 
     let trunk_config = TrunkConfig::new(
@@ -311,6 +275,10 @@ async fn run_vdo_capture(
     status.set_last_error(None);
 
     loop {
+        if stop.load(Ordering::Relaxed) {
+            info!("multimux-edge: capture stopped (idle or unmapped)");
+            break;
+        }
         let now = Timestamp::from_instant(start, Instant::now());
         driver.feed((), now);
         advance_route(&driver, route_handle, &mut progress).await;
