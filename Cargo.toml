@@ -40,6 +40,7 @@ utoipa    = "6"
 vdo          = { git = "https://github.com/fishloa/acap-rs", rev = "b1f674c7b5fdde8e171911c591cf1ecb0b3296b6", optional = true }
 axparameter  = { git = "https://github.com/fishloa/acap-rs", rev = "b1f674c7b5fdde8e171911c591cf1ecb0b3296b6", optional = true }
 acap-logging = { git = "https://github.com/fishloa/acap-rs", rev = "b1f674c7b5fdde8e171911c591cf1ecb0b3296b6", optional = true }
+acap-vapix   = { git = "https://github.com/fishloa/acap-rs", rev = "b1f674c7b5fdde8e171911c591cf1ecb0b3296b6", optional = true }
 # `VdoIngestSession` (src/vdo_source.rs, device-gated) implements
 # `media_plane::ingress`'s `Stage`/`IngestSession` traits directly — multimux
 # 0.5 (issue #805) deleted `multimux::pipeline::{run_pipeline, SampleSource}`
@@ -60,7 +61,7 @@ default = []
 # `VdoIngestSession`) + enables the bin. It ONLY builds inside the Axis ACAP
 # Native SDK sysroot (vdo-sys needs pkg-config `vdo`). Host builds omit it and
 # compile just the pure `convert`/`admin` lib + their tests.
-device = ["dep:vdo", "dep:axparameter", "dep:acap-logging", "dep:broadcast-common", "dep:media-plane"]
+device = ["dep:vdo", "dep:axparameter", "dep:acap-logging", "dep:acap-vapix", "dep:broadcast-common", "dep:media-plane"]
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

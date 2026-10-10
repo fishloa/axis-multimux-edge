@@ -24,5 +24,12 @@
             ],
             "settingPage": "index.html"
         }
+    },
+    "resources": {
+        "dbus": {
+            "requiredMethods": [
+                "com.axis.HTTPConf1.VAPIXServiceAccounts1.GetCredentials"
+            ]
+        }
     }
 }
