@@ -84,6 +84,7 @@ mod device {
     use super::*;
 
     const CACHE_FOR: Duration = Duration::from_secs(10);
+    const FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 
     /// VAPIX-backed source with a short cache, so a burst of first requests
     /// doesn't hit the camera once each.
@@ -113,6 +114,9 @@ mod device {
                 .send()
                 .await
                 .map_err(|e| format!("streamprofile.cgi request: {e}"))?;
+            if !resp.status().is_success() {
+                return Err(format!("streamprofile.cgi HTTP {}", resp.status()));
+            }
             let text = resp
                 .text()
                 .await
@@ -130,10 +134,19 @@ mod device {
                         return Ok(list.clone());
                     }
                 }
-                let list = Self::fetch().await?;
+                let list = tokio::time::timeout(FETCH_TIMEOUT, Self::fetch())
+                    .await
+                    .map_err(|_| "streamprofile.cgi timed out after 5 s".to_string())?;
+                let list = list?;
                 *cache = Some((Instant::now(), list.clone()));
                 Ok(list)
             })
+        }
+    }
+
+    impl Default for VapixProfileSource {
+        fn default() -> Self {
+            Self::new()
         }
     }
 }
