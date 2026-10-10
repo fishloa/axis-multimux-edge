@@ -9,6 +9,7 @@
 - [Configuration](operator/configuration.md)
 - [Troubleshooting](operator/troubleshooting.md)
 - [Security](operator/security.md)
+- [Admin API reference](api/reference.md)
 
 # Contributor Guide
 

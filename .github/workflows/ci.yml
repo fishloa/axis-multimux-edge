@@ -249,6 +249,7 @@ jobs:
         run: |
           mkdir -p site/api
           cp -r target/doc/* site/api/
+          cp docs/src/api/openapi.json site/api/
           echo '<meta http-equiv="refresh" content="0; url=multimux_edge/index.html">' > site/api/index.html
 
       - name: Upload Pages artifact
