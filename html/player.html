@@ -44,8 +44,9 @@
 </script>
 <script>
 (function () {
-  var name = decodeURIComponent(location.hash.slice(1));
-  var SRC = name ? "hls/" + name + "/media.m3u8" : "hls/media.m3u8"; // relative to /local/multimuxedge/
+  var name = "";
+  try { name = decodeURIComponent(location.hash.slice(1)); } catch (e) { name = ""; }
+  var SRC = name ? "hls/" + encodeURIComponent(name) + "/media.m3u8" : "hls/media.m3u8"; // relative to /local/multimuxedge/
   var picker = document.getElementById("stream");
   function opt(label, value) { var o = document.createElement("option"); o.textContent = label; o.value = value; picker.appendChild(o); }
   opt("default", "");

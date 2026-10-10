@@ -88,10 +88,10 @@
 </div>
 <template id="row-tpl">
   <tr>
-    <td><input class="name" type="text" placeholder="medium" maxlength="32"><div class="err"></div></td>
-    <td><select class="profile"></select><div class="chips"></div><div class="err"></div></td>
-    <td><input class="default" type="radio" name="default"></td>
-    <td><code class="url"></code> <a class="btn btn-ghost play" href="#">Play</a> <button class="btn btn-ghost copy" type="button">Copy</button></td>
+    <td data-label="Name"><input class="name" type="text" placeholder="medium" maxlength="32" aria-label="Stream name"><div class="err"></div></td>
+    <td data-label="Camera profile"><select class="profile" aria-label="Camera profile"></select><div class="chips"></div><div class="err"></div></td>
+    <td data-label="Default"><input class="default" type="radio" name="default" aria-label="Default stream"></td>
+    <td data-label="URL"><code class="url"></code> <a class="btn btn-ghost play" href="#">Play</a> <button class="btn btn-ghost copy" type="button">Copy</button></td>
     <td><button class="btn btn-ghost remove" type="button" aria-label="Remove">&times;</button></td>
   </tr>
 </template>

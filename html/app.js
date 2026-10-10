@@ -4,7 +4,6 @@
   const rows = $("stream-rows");
   const tpl = $("row-tpl");
   let profiles = [];
-  let base = new URL("hls/", location.href);
 
   const num = (id) => Number($(id).value);
 
@@ -39,8 +38,19 @@
 
   function updateUrl(row) {
     const name = row.querySelector(".name").value.trim();
-    row.querySelector(".url").textContent = name ? new URL(name + "/media.m3u8", base).pathname : "";
+    const path = name ? "hls/" + encodeURIComponent(name) + "/media.m3u8" : "";
+    row.querySelector(".url").textContent = path ? new URL(path, location.href).pathname : "";
     row.querySelector(".play").href = name ? "player.html#" + encodeURIComponent(name) : "#";
+    row.querySelector(".remove").setAttribute("aria-label", name ? "Remove " + name : "Remove");
+  }
+
+  function selectText(el) {
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    note("Press Ctrl/Cmd+C to copy", "");
   }
 
   function addRow(m, isDefault) {
@@ -50,10 +60,20 @@
     row.querySelector(".default").checked = isDefault;
     row.querySelector(".name").addEventListener("input", () => updateUrl(row));
     row.querySelector(".profile").addEventListener("change", () => chipsFor(row));
-    row.querySelector(".remove").addEventListener("click", () => row.remove());
+    row.querySelector(".remove").addEventListener("click", () => {
+      if (row.querySelector(".default").checked) $("default-main").checked = true;
+      row.remove();
+    });
     row.querySelector(".copy").addEventListener("click", () => {
-      const path = row.querySelector(".url").textContent;
-      if (path) navigator.clipboard.writeText(new URL(path, location.href).href);
+      const url = row.querySelector(".url");
+      const path = url.textContent;
+      if (!path) return;
+      const href = new URL(path, location.href).href;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(href).then(() => note("Copied", "ok"), () => selectText(url));
+      } else {
+        selectText(url);
+      }
     });
     updateUrl(row);
     chipsFor(row);
@@ -73,7 +93,7 @@
     $("f-window").value = cfg.window_segments;
     rows.replaceChildren();
     for (const m of cfg.streams) addRow(m, cfg.default_stream === m.name);
-    $("default-main").checked = !cfg.default_stream;
+    $("default-main").checked = !Array.from(rows.children).some((r) => r.querySelector(".default").checked);
   }
 
   function read() {
@@ -82,7 +102,7 @@
     for (const row of rows.children) {
       const name = row.querySelector(".name").value.trim();
       streams.push({ name, profile: row.querySelector(".profile").value });
-      if (row.querySelector(".default").checked) def = name;
+      if (row.querySelector(".default").checked) def = name || null;
     }
     return {
       main: { channel: num("f-main-channel"), width: num("f-main-width"), height: num("f-main-height"),
@@ -107,6 +127,7 @@
       const m = /^streams\[(\d+)\]\.(name|profile)$/.exec(e.field);
       if (m) {
         const row = rows.children[Number(m[1])];
+        if (!row) continue;
         const input = row.querySelector("." + m[2]);
         input.classList.add("invalid");
         input.parentElement.querySelector(".err").textContent = e.message;
@@ -121,9 +142,15 @@
     $("save-note").className = "note " + (cls || "");
   }
 
+  function setBusy(busy) {
+    $("save").disabled = busy;
+    $("add-stream").disabled = busy;
+    rows.querySelectorAll("input, select, button").forEach((e) => (e.disabled = busy));
+  }
+
   async function save() {
     clearErrors();
-    $("save").disabled = true;
+    setBusy(true);
     note("Applying…");
     try {
       const r = await fetch("admin/config", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(read()) });
@@ -140,7 +167,7 @@
     } catch (e) {
       note("Save failed: " + e, "err");
     } finally {
-      $("save").disabled = false;
+      setBusy(false);
     }
   }
 

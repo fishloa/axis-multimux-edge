@@ -1,7 +1,7 @@
 :root {
   color-scheme: light dark;
   --bg: #f4f5f7; --panel: #ffffff; --fg: #17191c; --muted: #6a717c; --border: #dde1e6;
-  --accent: #0e9f8a; --accent-fg: #ffffff; --err: #d93c3c; --ok: #1f9d55; --warn: #c27c0e;
+  --accent: #0b7a6a; --accent-fg: #ffffff; --err: #d93c3c; --ok: #1f9d55; --warn: #c27c0e;
   --radius: 8px; --sidebar: 200px;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
@@ -59,4 +59,5 @@ input.invalid, select.invalid { border-color: var(--err); }
   .grid thead { display: none; }
   .grid tr { display: grid; gap: .3rem; padding: .5rem 0; border-bottom: 1px solid var(--border); }
   .grid td { border: 0; padding: 0; }
+  .grid td[data-label]::before { content: attr(data-label); display: block; font-size: .7rem; color: var(--muted); }
 }
