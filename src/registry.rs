@@ -7,6 +7,9 @@ use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use serde::Serialize;
+use utoipa::ToSchema;
+
 use multimux::RouteHandle;
 use multimux::origin::{AppState, router};
 use multimux::output::OutputKind;
@@ -53,13 +56,10 @@ enum Target {
 }
 
 pub(crate) struct Capture {
-    #[allow(dead_code)] // read by the reaper / status endpoints (Task 5)
     pub(crate) settings: CaptureSettings,
     pub(crate) names: BTreeSet<String>,
     pub(crate) router: axum::Router,
-    #[allow(dead_code)] // Task 5
     pub(crate) status: StatusHandle,
-    #[allow(dead_code)] // Task 5
     pub(crate) started_at: Instant,
     pub(crate) last_used: Instant,
     _handle: Box<dyn CaptureHandle>,
@@ -220,11 +220,127 @@ impl Registry {
             return Ok(router);
         }
     }
+
+    /// Stop captures nobody has requested for `idle_timeout_secs`.
+    pub fn sweep(&self, now: Instant) {
+        let mut inner = self.lock();
+        let timeout = std::time::Duration::from_secs(inner.config.idle_timeout_secs);
+        inner
+            .captures
+            .retain(|_, c| now.saturating_duration_since(c.last_used) < timeout);
+    }
+
+    pub fn spawn_sweeper(self: &Arc<Self>) {
+        let reg = Arc::clone(self);
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(5));
+            loop {
+                tick.tick().await;
+                reg.sweep(Instant::now());
+            }
+        });
+    }
+
+    /// Swap in `new` (already validated). Captures keep running unless what
+    /// they serve changed.
+    pub fn apply(&self, new: Config) {
+        let mut inner = self.lock();
+        let old = std::mem::replace(&mut inner.config, new);
+        let llhls_changed = !old.llhls_eq(&inner.config);
+        let main_changed = old.main != inner.config.main;
+        let config = inner.config.clone();
+        inner.captures.retain(|_, c| {
+            if llhls_changed {
+                return false;
+            }
+            c.names.retain(|n| {
+                let before = target_of(&old, n);
+                let after = target_of(&config, n);
+                before == after && !(after == Some(Target::Main) && main_changed)
+            });
+            !c.names.is_empty()
+        });
+    }
+
+    pub fn snapshot(&self, now: Instant) -> RegistryStatus {
+        let inner = self.lock();
+        let mut streams: Vec<StreamStatus> = inner
+            .captures
+            .values()
+            .map(|c| {
+                let st = c.status.snapshot();
+                let secs = now.saturating_duration_since(c.started_at).as_secs_f64();
+                let state = if st.running && st.frames > 0 {
+                    "running"
+                } else if !st.running && st.last_error.is_some() {
+                    "error"
+                } else {
+                    "starting"
+                };
+                StreamStatus {
+                    names: c.names.iter().cloned().collect(),
+                    settings: c.settings.describe(),
+                    state: state.to_string(),
+                    running: st.running,
+                    current_segment: st.current_segment,
+                    current_part: st.current_part,
+                    frames: st.frames,
+                    fps: if secs > 0.0 {
+                        ((st.frames as f64 / secs) * 10.0).round() / 10.0
+                    } else {
+                        0.0
+                    },
+                    idle_secs: now.saturating_duration_since(c.last_used).as_secs(),
+                    last_error: st.last_error,
+                }
+            })
+            .collect();
+        streams.sort_by(|a, b| a.names.cmp(&b.names));
+        RegistryStatus {
+            encodes: EncodeUsage {
+                in_use: inner.captures.len() as u32,
+                max: inner.config.max_encodes,
+            },
+            streams,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct EncodeUsage {
+    pub in_use: u32,
+    pub max: u32,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct StreamStatus {
+    /// Names currently served by this capture.
+    pub names: Vec<String>,
+    /// e.g. `h264 1280x720@25 ch1`.
+    pub settings: String,
+    /// `starting`, `running` or `error`.
+    pub state: String,
+    pub running: bool,
+    pub current_segment: u32,
+    pub current_part: u32,
+    pub frames: u64,
+    /// Average fps since the capture started.
+    pub fps: f64,
+    /// Seconds since the last request.
+    pub idle_secs: u64,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct RegistryStatus {
+    pub encodes: EncodeUsage,
+    pub streams: Vec<StreamStatus>,
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
 
     use super::*;
     use crate::config::StreamMapping;
@@ -526,5 +642,125 @@ pub(crate) mod tests {
     async fn default_name_follows_config() {
         let (reg, _, _) = setup(&[("medium", "ACC_Medium")]);
         assert_eq!(reg.default_name(), "main");
+    }
+
+    #[tokio::test]
+    async fn idle_capture_stops_after_timeout_and_frees_encode() {
+        let (reg, counts, _) =
+            setup(&[("hi", "ACC_High"), ("med", "ACC_Medium"), ("lo", "ACC_Low")]);
+        let t0 = Instant::now();
+        reg.ensure("hi", t0).await.unwrap();
+        reg.ensure("med", t0 + Duration::from_secs(20))
+            .await
+            .unwrap();
+        reg.sweep(t0 + Duration::from_secs(29));
+        assert_eq!(counts.stopped.load(Ordering::SeqCst), 0);
+        reg.sweep(t0 + Duration::from_secs(30));
+        assert_eq!(counts.stopped.load(Ordering::SeqCst), 1); // "hi" idle 30 s
+        reg.ensure("lo", t0 + Duration::from_secs(31))
+            .await
+            .unwrap(); // slot freed
+    }
+
+    #[tokio::test]
+    async fn every_request_keeps_a_capture_alive() {
+        let (reg, counts, _) = setup(&[("med", "ACC_Medium")]);
+        let t0 = Instant::now();
+        for s in [0, 20, 40, 60] {
+            reg.ensure("med", t0 + Duration::from_secs(s))
+                .await
+                .unwrap();
+            reg.sweep(t0 + Duration::from_secs(s + 1));
+        }
+        assert_eq!(counts.stopped.load(Ordering::SeqCst), 0);
+        assert_eq!(counts.started.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn apply_keeps_unchanged_streams_running() {
+        let (reg, counts, _) = setup(&[("med", "ACC_Medium"), ("lo", "ACC_Low")]);
+        let now = Instant::now();
+        reg.ensure("med", now).await.unwrap();
+        let mut cfg = reg.config();
+        cfg.streams.retain(|s| s.name != "lo");
+        cfg.default_stream = Some("med".into());
+        cfg.max_encodes = 3;
+        reg.apply(cfg);
+        assert_eq!(counts.stopped.load(Ordering::SeqCst), 0);
+        reg.ensure("med", now).await.unwrap();
+        assert_eq!(counts.started.load(Ordering::SeqCst), 1);
+        assert_eq!(reg.default_name(), "med");
+    }
+
+    #[tokio::test]
+    async fn apply_stops_remapped_and_removed_streams() {
+        let (reg, counts, _) = setup(&[("med", "ACC_Medium"), ("lo", "ACC_Low")]);
+        let now = Instant::now();
+        reg.ensure("med", now).await.unwrap();
+        reg.ensure("lo", now).await.unwrap();
+        let mut cfg = reg.config();
+        cfg.streams = vec![StreamMapping {
+            name: "med".into(),
+            profile: "ACC_High".into(),
+        }];
+        reg.apply(cfg);
+        assert_eq!(counts.stopped.load(Ordering::SeqCst), 2);
+        assert!(matches!(
+            reg.ensure("lo", now).await,
+            Err(ServeError::NotFound)
+        ));
+        reg.ensure("med", now).await.unwrap(); // restarts with ACC_High
+        assert_eq!(counts.started.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn shared_capture_survives_while_one_name_still_maps_to_it() {
+        let (reg, counts, _) = setup(&[("a", "ACC_Medium"), ("b", "ACC_Medium")]);
+        let now = Instant::now();
+        reg.ensure("a", now).await.unwrap();
+        reg.ensure("b", now).await.unwrap();
+        let mut cfg = reg.config();
+        cfg.streams.retain(|s| s.name != "b");
+        reg.apply(cfg);
+        assert_eq!(counts.stopped.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn apply_llhls_change_restarts_everything() {
+        let (reg, counts, _) = setup(&[("med", "ACC_Medium")]);
+        let now = Instant::now();
+        reg.ensure("med", now).await.unwrap();
+        reg.ensure("main", now).await.unwrap();
+        let mut cfg = reg.config();
+        cfg.part_target_ms = 250;
+        reg.apply(cfg);
+        assert_eq!(counts.stopped.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn apply_main_change_restarts_only_main() {
+        let (reg, counts, _) = setup(&[("med", "ACC_Medium")]);
+        let now = Instant::now();
+        reg.ensure("med", now).await.unwrap();
+        reg.ensure("main", now).await.unwrap();
+        let mut cfg = reg.config();
+        cfg.main.framerate = 15;
+        reg.apply(cfg);
+        assert_eq!(counts.stopped.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn snapshot_reports_encodes_and_streams() {
+        let (reg, _, _) = setup(&[("a", "ACC_Medium"), ("b", "ACC_Medium")]);
+        let t0 = Instant::now();
+        reg.ensure("a", t0).await.unwrap();
+        reg.ensure("b", t0).await.unwrap();
+        let s = reg.snapshot(t0 + Duration::from_secs(3));
+        assert_eq!((s.encodes.in_use, s.encodes.max), (1, 2));
+        assert_eq!(s.streams.len(), 1);
+        assert_eq!(s.streams[0].names, vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(s.streams[0].settings, "h264 1280x720@25 ch0");
+        assert_eq!(s.streams[0].state, "starting");
+        assert_eq!(s.streams[0].idle_secs, 3);
     }
 }
