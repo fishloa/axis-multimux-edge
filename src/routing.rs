@@ -82,7 +82,7 @@ pub(crate) fn build_forward_uri(path: &str, query: Option<&str>) -> Result<Strin
 async fn forward(
     State(reg): State<Arc<Registry>>,
     Path((name, _)): Path<(String, String)>,
-    mut req: Request,
+    req: Request,
 ) -> Response {
     // Validate and build forwarded URI before calling ensure() to avoid starting
     // a capture for invalid paths.
@@ -96,12 +96,23 @@ async fn forward(
         Err(e) => return serve_error(e),
     };
 
-    match uri_str.parse() {
-        Ok(u) => *req.uri_mut() = u,
+    // Rebuild the request without outer route extensions to prevent path param
+    // conflicts in the inner router (multimux stores params in extensions).
+    let (parts, body) = req.into_parts();
+    let fwd = match axum::http::Request::builder()
+        .method(parts.method)
+        .uri(uri_str.parse::<axum::http::Uri>().unwrap())
+        .version(parts.version)
+        .body(body)
+    {
+        Ok(mut fwd) => {
+            *fwd.headers_mut() = parts.headers;
+            fwd
+        }
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),
-    }
+    };
 
-    match router.oneshot(req).await {
+    match router.oneshot(fwd).await {
         Ok(resp) => resp,
         Err(never) => match never {},
     }
@@ -305,5 +316,39 @@ mod tests {
         );
         // Capture was not started due to early validation
         assert_eq!(counts.started.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn init_segment_not_500_with_wrong_path_args() {
+        // Regression: outer route's path params must not leak into inner router.
+        // On empty stream, multimux returns 404 or 503, never 500 with "Wrong number of path arguments".
+        let (app, _) = app(&[("medium", "ACC_Medium")]);
+        let r = get(&app, "/hls/medium/init-1-0-1.mp4").await;
+        assert_ne!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = axum::body::to_bytes(r.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(
+            !std::str::from_utf8(&body)
+                .map(|s| s.contains("Wrong number of path arguments"))
+                .unwrap_or(false)
+        );
+    }
+
+    #[tokio::test]
+    async fn part_segment_not_500_with_wrong_path_args() {
+        // Regression: outer route's path params must not leak into inner router.
+        // On empty stream, multimux returns 404 or 503, never 500 with "Wrong number of path arguments".
+        let (app, _) = app(&[("medium", "ACC_Medium")]);
+        let r = get(&app, "/hls/medium/part-1-0-1.0.m4s").await;
+        assert_ne!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = axum::body::to_bytes(r.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(
+            !std::str::from_utf8(&body)
+                .map(|s| s.contains("Wrong number of path arguments"))
+                .unwrap_or(false)
+        );
     }
 }
