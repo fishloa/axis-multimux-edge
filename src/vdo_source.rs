@@ -127,6 +127,15 @@ const CLOCK_RATE: u32 = 90_000;
 /// fallback) while avoiding blocking forever on a stream that never keys.
 const PARAM_SET_SCAN_LIMIT: usize = 150;
 
+/// Number of VDO buffers to allocate for the stream.
+///
+/// VDO's default of 3 buffers dropped frames at 4K resolution on ARTPEC-6
+/// hardware (~16–19 fps observed, versus 25 fps from the camera's own RTSP
+/// server from the same encoder, 2026-10-10). Increasing to 8 buffers allows
+/// VDO to continue encoding while the application is converting and processing
+/// previously captured frames, reducing frame loss.
+const VDO_BUFFER_COUNT: u32 = 8;
+
 /// The first IDR access unit found while collecting parameter sets, held onto
 /// so it can be delivered as the first real sample instead of being dropped.
 ///
@@ -225,6 +234,7 @@ impl VdoIngestSession {
             .resolution(Resolution::Exact { width, height })
             .framerate(framerate)
             .gop_length(gop_length)
+            .buffers(VDO_BUFFER_COUNT)
             .build()?;
 
         let running = stream.start()?;
