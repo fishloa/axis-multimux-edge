@@ -11,6 +11,7 @@ pub mod error;
 pub mod profile;
 pub mod profile_source;
 pub mod registry;
+pub mod routing;
 
 #[cfg(feature = "device")]
 pub mod vdo_source;
