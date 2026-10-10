@@ -18,12 +18,13 @@
     "/admin/config": {
       "get": {
         "tags": [
-          "crate::admin"
+          "admin"
         ],
         "summary": "Current configuration.",
         "operationId": "get_config",
         "responses": {
           "200": {
+            "description": "Current configuration",
             "content": {
               "application/json": {
                 "schema": {
@@ -36,7 +37,7 @@
       },
       "post": {
         "tags": [
-          "crate::admin"
+          "admin"
         ],
         "summary": "Validate, store and apply a configuration. Applies immediately.",
         "operationId": "post_config",
@@ -52,6 +53,7 @@
         },
         "responses": {
           "200": {
+            "description": "Stored and applied",
             "content": {
               "application/json": {
                 "schema": {
@@ -61,6 +63,7 @@
             }
           },
           "400": {
+            "description": "Validation failed; nothing stored or applied",
             "content": {
               "application/json": {
                 "schema": {
@@ -85,13 +88,16 @@
     "/admin/openapi.json": {
       "get": {
         "tags": [
-          "crate::admin"
+          "admin"
         ],
         "summary": "This API's OpenAPI 3 description.",
         "operationId": "get_openapi",
         "responses": {
           "200": {
-            "description": "OpenAPI document"
+            "description": "OpenAPI document",
+            "content": {
+              "application/json": {}
+            }
           }
         }
       }
@@ -99,12 +105,13 @@
     "/admin/profiles": {
       "get": {
         "tags": [
-          "crate::admin"
+          "admin"
         ],
         "summary": "The camera's stream profiles and what this app would capture for each.",
         "operationId": "get_profiles",
         "responses": {
           "200": {
+            "description": "Camera stream profiles",
             "content": {
               "application/json": {
                 "schema": {
@@ -119,12 +126,13 @@
     "/admin/status": {
       "get": {
         "tags": [
-          "crate::admin"
+          "admin"
         ],
         "summary": "Encoder usage and every running capture.",
         "operationId": "get_status",
         "responses": {
           "200": {
+            "description": "Encoder usage and captures",
             "content": {
               "application/json": {
                 "schema": {
@@ -493,5 +501,11 @@
         }
       }
     }
-  }
+  },
+  "tags": [
+    {
+      "name": "admin",
+      "description": "Multimux Edge configuration and status"
+    }
+  ]
 }

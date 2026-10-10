@@ -11,6 +11,7 @@ use utoipa::OpenApi;
         description = "Configure stream mappings and inspect captures. All paths are under /local/multimuxedge and require the camera's admin access level."
     ),
     servers((url = "/local/multimuxedge")),
+    tags((name = "admin", description = "Multimux Edge configuration and status")),
     paths(
         crate::admin::get_config,
         crate::admin::post_config,
