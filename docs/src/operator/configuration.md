@@ -215,10 +215,14 @@ and joins it. A joined stream:
 - carries the existing encode's compression, Zipstream and overlay settings;
 - shows `"shared_encode": true` in `/admin/status` and doesn't count
   against `max_encodes`;
-- keeps running if the client that started the encode disconnects.
+- keeps running if the camera's other clients of that encode disconnect;
+  it then carries the encode alone and counts against `max_encodes` again
+  (within about 5 seconds).
 
 A stream that has nothing to join gets an encode of its own, which counts
-against `max_encodes`. Every distinct encode shares the encoder budget, as
+against `max_encodes`. A stream that can join is let in even when
+`max_encodes` is reached. The app never joins its own encodes; streams that
+resolve to the same settings already share one capture. Every distinct encode shares the encoder budget, as
 it would for an RTSP client: on the P1448-LE, a 4K stream plus two more
 distinct encodes (say 1080p and 720p) bring everything down to about
 20 fps.
