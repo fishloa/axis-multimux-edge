@@ -16,6 +16,11 @@ here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 - `GET /admin/profiles` and an OpenAPI description at
   `GET /admin/openapi.json`; API reference on the docs site.
 - Redesigned admin page (Multimux Edge look, live status, light/dark).
+- **Profile encoder keys.** `compression`, `rotation`, `mirror`,
+  `videobitratemode` (vbr/mbr/abr), `videomaxbitrate`, the ABR target and
+  retention, and the Zipstream GOP/fps modes and maximum GOP length are now
+  applied, mapped to VDO the way the camera's RTSP server maps them, instead
+  of being ignored.
 - **Encode sharing.** A stream joins an encode the camera is already running
   for the same camera, codec, resolution and frame rate (e.g. for a VMS over
   RTSP) instead of starting a second one. Joined streams run at full rate,
