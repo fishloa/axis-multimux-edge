@@ -49,6 +49,11 @@ here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 - 4K streams no longer capped at ~18 fps. The cap came from running a
   second 4K encode next to the one the camera already ran for its RTSP
   clients; the stream now joins that encode (25 fps on the P1448-LE).
+- A capture now stops within about a second even if its camera channel
+  stops producing frames; before, it waited for the next frame and kept
+  its encode open.
+- A panic now restarts the app (the ACAP respawns it) instead of leaving a
+  capture that looked running but delivered nothing.
 
 ## [0.2.0] - 2026-10-05
 
