@@ -47,19 +47,27 @@ pub struct StreamDesc {
     pub zip_max_gop_length: u32,
 }
 
-/// Whether `s` has every encoder setting `t` sets.
+/// Whether `s` has every encoder setting `t` sets. Rotation and mirroring
+/// change the picture, so leaving them unset means upright and unmirrored;
+/// the other keys left unset accept whatever the stream uses.
 fn tuning_matches(t: &Tuning, s: &StreamDesc) -> bool {
     let eq = |want: Option<u32>, have: u32| want.is_none_or(|w| w == have);
-    eq(t.compression, s.compression)
-        && eq(t.rotation, s.rotation)
-        && t.mirror.is_none_or(|m| m == s.horizontal_flip)
+    t.rotation.unwrap_or(0) == s.rotation
+        && t.mirror.unwrap_or(false) == s.horizontal_flip
+        && eq(t.compression, s.compression)
         && eq(t.rate_control.map(|r| r.vdo_mode()), s.rc_mode)
-        && eq(t.max_bitrate_kbps.map(|k| k * 1024), s.bitrate)
-        && eq(t.abr_target_kbps.map(|k| k * 1024), s.abr_target_bitrate)
+        && eq(t.max_bitrate_kbps.map(kbps_to_bps), s.bitrate)
+        && eq(t.abr_target_kbps.map(kbps_to_bps), s.abr_target_bitrate)
         && eq(t.abr_retention_secs, s.abr_retention_time)
         && eq(t.zip_dynamic_gop.map(u32::from), s.zip_gop_mode)
         && eq(t.zip_dynamic_fps.map(u32::from), s.zip_fps_mode)
         && eq(t.zip_max_gop_length, s.zip_max_gop_length)
+}
+
+/// VAPIX kbit/s to VDO bit/s (× 1024, as the camera's RTSP server does),
+/// saturating rather than overflowing.
+pub fn kbps_to_bps(kbps: u32) -> u32 {
+    kbps.saturating_mul(1024)
 }
 
 /// The first sharable stream that delivers `want`: same channel, codec and
@@ -266,5 +274,54 @@ mod tests {
             ..Tuning::default()
         };
         assert_eq!(pick_shareable(&[mbr], &tuned(t)), Some(0x47));
+    }
+
+    #[test]
+    fn unset_rotation_and_mirror_only_join_an_upright_unmirrored_encode() {
+        let rotated = StreamDesc {
+            rotation: 180,
+            ..monolith_4k()
+        };
+        let mirrored = StreamDesc {
+            horizontal_flip: true,
+            ..monolith_4k()
+        };
+        assert_eq!(pick_shareable(&[rotated.clone(), mirrored], &want()), None);
+        let t = Tuning {
+            rotation: Some(180),
+            ..Tuning::default()
+        };
+        assert_eq!(
+            pick_shareable(
+                &[rotated],
+                &CaptureSettings {
+                    tuning: t,
+                    ..want()
+                }
+            ),
+            Some(0x47)
+        );
+    }
+
+    #[test]
+    fn huge_bitrates_saturate_instead_of_overflowing() {
+        let t = Tuning {
+            max_bitrate_kbps: Some(u32::MAX),
+            ..Tuning::default()
+        };
+        let s = StreamDesc {
+            bitrate: u32::MAX,
+            ..monolith_4k()
+        };
+        assert_eq!(
+            pick_shareable(
+                &[s],
+                &CaptureSettings {
+                    tuning: t,
+                    ..want()
+                }
+            ),
+            Some(0x47)
+        );
     }
 }

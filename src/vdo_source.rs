@@ -392,8 +392,14 @@ fn own_encode_settings(settings: &crate::profile::CaptureSettings) -> Map {
         (c"compression", t.compression),
         (c"rotation", t.rotation),
         (c"rc.mode", t.rate_control.map(|r| r.vdo_mode())),
-        (c"bitrate", t.max_bitrate_kbps.map(|k| k * 1024)),
-        (c"abr.target_bitrate", t.abr_target_kbps.map(|k| k * 1024)),
+        (
+            c"bitrate",
+            t.max_bitrate_kbps.map(crate::vdo_share::kbps_to_bps),
+        ),
+        (
+            c"abr.target_bitrate",
+            t.abr_target_kbps.map(crate::vdo_share::kbps_to_bps),
+        ),
         (c"abr.retention_time", t.abr_retention_secs),
         (c"zip.gop_mode", t.zip_dynamic_gop.map(u32::from)),
         (c"zip.fps_mode", t.zip_dynamic_fps.map(u32::from)),
