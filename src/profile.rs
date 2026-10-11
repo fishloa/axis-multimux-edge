@@ -33,9 +33,9 @@ pub struct CaptureSettings {
 pub struct Tuning {
     /// `compression` → VDO `compression` (0–100).
     pub compression: Option<u32>,
-    /// `rotation` → `rotation` (0, 90, 180 or 270).
+    /// `rotation` → `rotation` (90, 180 or 270; 0 is stored as `None`).
     pub rotation: Option<u32>,
-    /// `mirror` → `horizontal_flip`.
+    /// `mirror=1` → `horizontal_flip` (`mirror=0` is stored as `None`).
     pub mirror: Option<bool>,
     /// `videobitratemode` → `rc.mode`.
     pub rate_control: Option<RateControl>,
@@ -243,9 +243,13 @@ pub fn parse_profile(parameters: &str, fallback: &MainPreset) -> Result<ParsedPr
                 if ![0, 90, 180, 270].contains(&r) {
                     return Err(format!("rotation: \"{value}\" is not 0, 90, 180 or 270"));
                 }
-                settings.tuning.rotation = Some(r);
+                // 0 is the default; store it as unset so equal profiles
+                // share a capture.
+                settings.tuning.rotation = (r != 0).then_some(r);
             }
-            "mirror" => settings.tuning.mirror = Some(parse_u32("mirror", &value)? != 0),
+            "mirror" => {
+                settings.tuning.mirror = (parse_u32("mirror", &value)? != 0).then_some(true)
+            }
             "videomaxbitrate" => {
                 settings.tuning.max_bitrate_kbps = Some(parse_u32("videomaxbitrate", &value)?)
             }
@@ -406,7 +410,10 @@ mod tests {
         assert_eq!(p.settings.tuning.rate_control, Some(RateControl::Abr));
         assert_eq!(p.settings.tuning.abr_target_kbps, Some(300));
         assert_eq!(p.settings.tuning.abr_retention_secs, Some(3600));
-        assert_eq!(p.settings.tuning.mirror, Some(false));
+        // The defaults are the same as leaving the key out.
+        assert_eq!(p.settings.tuning.mirror, None);
+        let p = parse_profile("rotation=0&mirror=0", &main_preset()).unwrap();
+        assert_eq!(p.settings.tuning, Tuning::default());
     }
 
     #[test]

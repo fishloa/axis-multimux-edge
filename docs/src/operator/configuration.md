@@ -107,7 +107,10 @@ profile over RTSP:
 Other profile keys (audio, text overlays, `videozstrength`, …) are **ignored**;
 the admin page lists them next to each profile. A stream that joins an encode
 the camera already runs carries that encode's settings for the keys its
-profile doesn't set.
+profile doesn't set, except `rotation` and `mirror`: a profile without them
+only joins an upright, unmirrored encode. If the camera's image is rotated
+in its own settings, set `rotation` in the profile to match so the stream
+can share the camera's encodes.
 
 ## API
 
