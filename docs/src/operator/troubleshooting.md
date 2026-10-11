@@ -46,9 +46,10 @@ Interpret the response as follows:
   - `settings` — capture codec, resolution, fps, and VDO channel, e.g. `h264 1280x720@25 ch1`.
   - `state` — `starting`, `running`, or `error`.
   - `last_error` — reason the stream failed, if any.
-  - `shared_encode` — `true` when the stream joined an encode the camera was
-    already running (for its RTSP clients, say); such streams don't count in
-    `encodes.in_use`.
+  - `shared_encode` — `true` while the stream shares an encode the camera
+    was already running (for its RTSP clients, say); such streams don't
+    count in `encodes.in_use`. It turns `false` once the camera's other
+    clients of that encode have left.
 
 ## Stream URLs
 
