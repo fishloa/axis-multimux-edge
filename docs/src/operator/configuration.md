@@ -84,18 +84,30 @@ it redirects to `/main/media.m3u8`.
 
 ## Profile Keys
 
-Stream profiles can override these keys from the main capture settings:
+Stream profiles can set these keys. Each is applied the way the camera's own
+RTSP server applies it, so a mapped profile streams the same picture as the
+profile over RTSP:
 
 | Key | Type | Meaning |
 |---|---|---|
-| `videocodec` | string | `"h264"` or `"h265"` to override the main codec. |
-| `resolution` | string | Width × height, e.g., `"1280x720"`, to override width/height. |
-| `fps` | integer | Frames per second to override the main framerate. If omitted or 0, the camera's default fps is used. |
+| `videocodec` | string | `"h264"` or `"h265"`. If omitted, the main codec. |
+| `resolution` | string | Width × height, e.g., `"1280x720"`. If omitted, the main resolution. |
+| `fps` | integer | Frames per second. If omitted or 0, the camera's default fps is used. |
 | `camera` | integer | VDO channel index. If omitted, camera 1 is used (the VAPIX default, the same video the camera's own RTSP server sends for that profile), not the main channel. |
 | `videokeyframeinterval` | integer | Keyframe interval; 0 means the camera default and is treated as unset. |
+| `compression` | integer | Compression, 0–100. |
+| `rotation` | integer | 0, 90, 180 or 270. |
+| `mirror` | 0/1 | Mirror the image horizontally. |
+| `videobitratemode` | string | `vbr`, `mbr` or `abr` (`cbr` is not supported and is ignored). |
+| `videomaxbitrate` | integer | Maximum bitrate in kbit/s (for `mbr`). |
+| `videoabrtargetbitrate`, `videoabrretentiontime` | integer | Average bitrate target (kbit/s) and retention time (s) for `abr`. |
+| `videozgopmode`, `videozfpsmode` | string | Zipstream GOP and frame rate mode: `fixed` or `dynamic`. |
+| `videozmaxgoplength` | integer | Zipstream maximum GOP length. |
 
-All other profile keys (compression, bitrate, audio, etc.) are **ignored** — the stream will use whatever the
-profile specifies for those. If a profile omits `videocodec` or `resolution`, the corresponding main setting is used.
+Other profile keys (audio, text overlays, `videozstrength`, …) are **ignored**;
+the admin page lists them next to each profile. A stream that joins an encode
+the camera already runs carries that encode's settings for the keys its
+profile doesn't set.
 
 ## API
 
