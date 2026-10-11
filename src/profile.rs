@@ -1,8 +1,10 @@
 //! Turns an Axis stream profile's parameter string (VAPIX
 //! `streamprofile.cgi`, e.g. `resolution=1280x720&fps=25&videocodec=h264`)
-//! into the capture settings VDO supports. Keys VDO can't apply through the
-//! acap-rs `StreamBuilder` (compression, bitrate, audio, …) are reported as
-//! ignored rather than silently dropped.
+//! into the capture settings VDO supports, including the encoder keys the
+//! camera's RTSP server maps to VDO stream settings (compression, rotation,
+//! bitrate mode, Zipstream, …; see [`Tuning`]). Keys with no VDO equivalent
+//! (audio, text overlays, …) are reported as ignored rather than silently
+//! dropped.
 
 use crate::config::MainPreset;
 use crate::convert::Codec;
@@ -17,8 +19,101 @@ pub struct CaptureSettings {
     pub height: u32,
     /// 0 = camera default rate.
     pub framerate: u32,
-    /// Key-frame interval in frames; `None` = derive from framerate.
+    /// Key-frame interval in frames; `None` = the camera's default.
     pub gop_length: Option<u32>,
+    /// Encoder keys the profile sets.
+    pub tuning: Tuning,
+}
+
+/// Encoder settings a stream profile can set beyond codec, size, rate and
+/// GOP, each as the VDO stream setting the camera's own RTSP server uses for
+/// the same VAPIX key (mapping read off the camera's RTSP encodes). `None`
+/// leaves VDO's default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Tuning {
+    /// `compression` → VDO `compression` (0–100).
+    pub compression: Option<u32>,
+    /// `rotation` → `rotation` (0, 90, 180 or 270).
+    pub rotation: Option<u32>,
+    /// `mirror` → `horizontal_flip`.
+    pub mirror: Option<bool>,
+    /// `videobitratemode` → `rc.mode`.
+    pub rate_control: Option<RateControl>,
+    /// `videomaxbitrate` (kbit/s) → `bitrate` (bit/s, × 1024).
+    pub max_bitrate_kbps: Option<u32>,
+    /// `videoabrtargetbitrate` (kbit/s) → `abr.target_bitrate` (× 1024).
+    pub abr_target_kbps: Option<u32>,
+    /// `videoabrretentiontime` (s) → `abr.retention_time`.
+    pub abr_retention_secs: Option<u32>,
+    /// `videozgopmode` (fixed/dynamic) → `zip.gop_mode` (0/1).
+    pub zip_dynamic_gop: Option<bool>,
+    /// `videozfpsmode` (fixed/dynamic) → `zip.fps_mode` (0/1).
+    pub zip_dynamic_fps: Option<bool>,
+    /// `videozmaxgoplength` → `zip.max_gop_length`.
+    pub zip_max_gop_length: Option<u32>,
+}
+
+/// `videobitratemode` values with a known VDO `rc.mode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RateControl {
+    Vbr,
+    Mbr,
+    Abr,
+}
+
+impl RateControl {
+    /// VDO's `rc.mode` value, as the camera's RTSP encodes use it.
+    pub fn vdo_mode(self) -> u32 {
+        match self {
+            RateControl::Vbr => 1,
+            RateControl::Mbr => 2,
+            RateControl::Abr => 3,
+        }
+    }
+}
+
+impl Tuning {
+    /// The keys set, in VAPIX names, e.g. `compression=50 rotation=180`.
+    pub fn describe(&self) -> String {
+        let mode = |dynamic: bool| if dynamic { "dynamic" } else { "fixed" };
+        let mut parts = Vec::new();
+        if let Some(v) = self.compression {
+            parts.push(format!("compression={v}"));
+        }
+        if let Some(v) = self.rotation {
+            parts.push(format!("rotation={v}"));
+        }
+        if let Some(v) = self.mirror {
+            parts.push(format!("mirror={}", u8::from(v)));
+        }
+        if let Some(v) = self.rate_control {
+            let name = match v {
+                RateControl::Vbr => "vbr",
+                RateControl::Mbr => "mbr",
+                RateControl::Abr => "abr",
+            };
+            parts.push(format!("videobitratemode={name}"));
+        }
+        if let Some(v) = self.max_bitrate_kbps {
+            parts.push(format!("videomaxbitrate={v}"));
+        }
+        if let Some(v) = self.abr_target_kbps {
+            parts.push(format!("videoabrtargetbitrate={v}"));
+        }
+        if let Some(v) = self.abr_retention_secs {
+            parts.push(format!("videoabrretentiontime={v}"));
+        }
+        if let Some(v) = self.zip_dynamic_gop {
+            parts.push(format!("videozgopmode={}", mode(v)));
+        }
+        if let Some(v) = self.zip_dynamic_fps {
+            parts.push(format!("videozfpsmode={}", mode(v)));
+        }
+        if let Some(v) = self.zip_max_gop_length {
+            parts.push(format!("videozmaxgoplength={v}"));
+        }
+        parts.join(" ")
+    }
 }
 
 impl CaptureSettings {
@@ -30,6 +125,7 @@ impl CaptureSettings {
             height: m.height,
             framerate: m.framerate,
             gop_length: None,
+            tuning: Tuning::default(),
         })
     }
 
@@ -44,10 +140,16 @@ impl CaptureSettings {
         } else {
             self.framerate.to_string()
         };
-        format!(
+        let base = format!(
             "{codec} {}x{}@{fps} ch{}",
             self.width, self.height, self.channel
-        )
+        );
+        let tuning = self.tuning.describe();
+        if tuning.is_empty() {
+            base
+        } else {
+            format!("{base} {tuning}")
+        }
     }
 }
 
@@ -135,6 +237,50 @@ pub fn parse_profile(parameters: &str, fallback: &MainPreset) -> Result<ParsedPr
                 let gop = parse_u32("videokeyframeinterval", &value)?;
                 settings.gop_length = if gop == 0 { None } else { Some(gop) }
             }
+            "compression" => settings.tuning.compression = Some(parse_u32("compression", &value)?),
+            "rotation" => {
+                let r = parse_u32("rotation", &value)?;
+                if ![0, 90, 180, 270].contains(&r) {
+                    return Err(format!("rotation: \"{value}\" is not 0, 90, 180 or 270"));
+                }
+                settings.tuning.rotation = Some(r);
+            }
+            "mirror" => settings.tuning.mirror = Some(parse_u32("mirror", &value)? != 0),
+            "videomaxbitrate" => {
+                settings.tuning.max_bitrate_kbps = Some(parse_u32("videomaxbitrate", &value)?)
+            }
+            "videoabrtargetbitrate" => {
+                settings.tuning.abr_target_kbps = Some(parse_u32("videoabrtargetbitrate", &value)?)
+            }
+            "videoabrretentiontime" => {
+                settings.tuning.abr_retention_secs =
+                    Some(parse_u32("videoabrretentiontime", &value)?)
+            }
+            "videozmaxgoplength" => {
+                settings.tuning.zip_max_gop_length = Some(parse_u32("videozmaxgoplength", &value)?)
+            }
+            "videobitratemode" => match value.to_ascii_lowercase().as_str() {
+                "vbr" => settings.tuning.rate_control = Some(RateControl::Vbr),
+                "mbr" => settings.tuning.rate_control = Some(RateControl::Mbr),
+                "abr" => settings.tuning.rate_control = Some(RateControl::Abr),
+                _ => {
+                    ignored.insert(key);
+                }
+            },
+            "videozgopmode" | "videozfpsmode" => {
+                let dynamic = match value.to_ascii_lowercase().as_str() {
+                    "dynamic" => Some(true),
+                    "fixed" => Some(false),
+                    _ => None,
+                };
+                match (key.as_str(), dynamic) {
+                    (_, None) => {
+                        ignored.insert(key);
+                    }
+                    ("videozgopmode", d) => settings.tuning.zip_dynamic_gop = d,
+                    (_, d) => settings.tuning.zip_dynamic_fps = d,
+                }
+            }
             _ => {
                 ignored.insert(key);
             }
@@ -175,13 +321,14 @@ mod tests {
                 width: 1280,
                 height: 720,
                 framerate: 15,
-                gop_length: None
+                gop_length: None,
+                tuning: Tuning {
+                    compression: Some(30),
+                    ..Tuning::default()
+                },
             }
         );
-        assert_eq!(
-            p.ignored_keys,
-            vec!["audio".to_string(), "compression".to_string()]
-        );
+        assert_eq!(p.ignored_keys, vec!["audio".to_string()]);
     }
 
     #[test]
@@ -224,8 +371,67 @@ mod tests {
 
     #[test]
     fn ignored_keys_are_sorted_and_unique() {
-        let p = parse_profile("zz=1&audio=0&audio=1&compression=3", &main_preset()).unwrap();
-        assert_eq!(p.ignored_keys, vec!["audio", "compression", "zz"]);
+        let p = parse_profile("zz=1&audio=0&audio=1&text=1", &main_preset()).unwrap();
+        assert_eq!(p.ignored_keys, vec!["audio", "text", "zz"]);
+    }
+
+    #[test]
+    fn encoder_keys_become_tuning() {
+        let p = parse_profile(
+            "compression=50&rotation=180&mirror=1&videobitratemode=mbr&videomaxbitrate=500\
+             &videozgopmode=dynamic&videozfpsmode=dynamic&videozmaxgoplength=600",
+            &main_preset(),
+        )
+        .unwrap();
+        assert_eq!(
+            p.settings.tuning,
+            Tuning {
+                compression: Some(50),
+                rotation: Some(180),
+                mirror: Some(true),
+                rate_control: Some(RateControl::Mbr),
+                max_bitrate_kbps: Some(500),
+                zip_dynamic_gop: Some(true),
+                zip_dynamic_fps: Some(true),
+                zip_max_gop_length: Some(600),
+                ..Tuning::default()
+            }
+        );
+        assert!(p.ignored_keys.is_empty(), "{:?}", p.ignored_keys);
+        let p = parse_profile(
+            "videobitratemode=abr&videoabrtargetbitrate=300&videoabrretentiontime=3600&mirror=0",
+            &main_preset(),
+        )
+        .unwrap();
+        assert_eq!(p.settings.tuning.rate_control, Some(RateControl::Abr));
+        assert_eq!(p.settings.tuning.abr_target_kbps, Some(300));
+        assert_eq!(p.settings.tuning.abr_retention_secs, Some(3600));
+        assert_eq!(p.settings.tuning.mirror, Some(false));
+    }
+
+    #[test]
+    fn encoder_keys_with_unknown_words_are_ignored_and_bad_numbers_rejected() {
+        let p = parse_profile("videobitratemode=cbr&videozgopmode=wobbly", &main_preset()).unwrap();
+        assert_eq!(p.settings.tuning, Tuning::default());
+        assert_eq!(p.ignored_keys, vec!["videobitratemode", "videozgopmode"]);
+        assert!(parse_profile("compression=high", &main_preset()).is_err());
+        assert!(parse_profile("rotation=45", &main_preset()).is_err());
+    }
+
+    #[test]
+    fn describe_lists_tuning() {
+        let s = CaptureSettings {
+            tuning: Tuning {
+                compression: Some(50),
+                rotation: Some(180),
+                ..Tuning::default()
+            },
+            ..CaptureSettings::from_main(&main_preset()).unwrap()
+        };
+        assert_eq!(
+            s.describe(),
+            "h264 1920x1080@30 ch0 compression=50 rotation=180"
+        );
     }
 
     #[test]
@@ -237,6 +443,7 @@ mod tests {
             height: 2160,
             framerate: 25,
             gop_length: None,
+            tuning: Tuning::default(),
         };
         assert_eq!(s.describe(), "h265 3840x2160@25 ch1");
         let s = CaptureSettings { framerate: 0, ..s };
