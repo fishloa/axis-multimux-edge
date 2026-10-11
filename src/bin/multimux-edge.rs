@@ -57,7 +57,7 @@ use multimux::source::{DriverProgress, advance_route};
 use multimux::{Backoff, MultimuxError, RouteHandle};
 use multimux_edge::admin::{self, AxParameterStore, ConfigStore, StatusHandle};
 use multimux_edge::profile::CaptureSettings;
-use multimux_edge::profile_source::VapixProfileSource;
+use multimux_edge::profile_source::{BoxFuture, VapixProfileSource};
 use multimux_edge::registry::{CaptureFactory, CaptureHandle, Registry};
 use multimux_edge::routing;
 use multimux_edge::vdo_source::VdoIngestSession;
@@ -185,6 +185,16 @@ impl Drop for VdoCapture {
 struct VdoCaptureFactory;
 
 impl CaptureFactory for VdoCaptureFactory {
+    fn joinable(&self, settings: CaptureSettings) -> BoxFuture<'static, bool> {
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || {
+                multimux_edge::vdo_source::can_join_existing_encode(&settings)
+            })
+            .await
+            .unwrap_or(false)
+        })
+    }
+
     fn start(
         &self,
         settings: CaptureSettings,
@@ -270,10 +280,12 @@ async fn run_vdo_capture(
     if stop.load(Ordering::Relaxed) {
         return Ok(());
     }
-    let session = VdoIngestSession::new(settings, stop).map_err(|e| MultimuxError::Connect {
-        reason: format!("VdoIngestSession init failed: {e}"),
-    })?;
-    status.set_shared_encode(session.shared_encode().is_some());
+    let shared_status = status.clone();
+    let on_shared = Box::new(move |shared: bool| shared_status.set_shared_encode(shared));
+    let session =
+        VdoIngestSession::new(settings, stop, on_shared).map_err(|e| MultimuxError::Connect {
+            reason: format!("VdoIngestSession init failed: {e}"),
+        })?;
 
     let trunk_config = TrunkConfig::new(
         source_nz(DRIVER_TIMED_CAPACITY),

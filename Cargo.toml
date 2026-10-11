@@ -32,16 +32,16 @@ utoipa    = "6"
 tower     = { version = "0.5", features = ["util"] }
 
 # device-only (ACAP SDK Docker): acap-rs crates, git-pinned (unpublished 0.0.0).
-# fishloa/acap-rs fork: upstream rev 5eed2e2 (branch `fw11-vdo-compat-v2`) plus
-# ONE commit that drops the fw12-only VDO_ERROR_NO_VIDEO diagnostic arm, so `vdo`
-# compiles against BOTH the firmware-11 SDK 1.15.1 and firmware-12 SDK sysroots
-# (upstream only builds against the fw12 VDO API). StreamBuilder::gop_length, the
-# fork's other former patch, is upstream now (#249). Back to upstream once the
-# fw11 fix lands there.
-vdo          = { git = "https://github.com/fishloa/acap-rs", rev = "a809260df3ad7d27079a2e3edffd7dfd6c677cd3", optional = true }
-axparameter  = { git = "https://github.com/fishloa/acap-rs", rev = "a809260df3ad7d27079a2e3edffd7dfd6c677cd3", optional = true }
-acap-logging = { git = "https://github.com/fishloa/acap-rs", rev = "a809260df3ad7d27079a2e3edffd7dfd6c677cd3", optional = true }
-acap-vapix   = { git = "https://github.com/fishloa/acap-rs", rev = "a809260df3ad7d27079a2e3edffd7dfd6c677cd3", optional = true }
+# fishloa/acap-rs fork, branch `vdo-fw11-stream-sharing`: upstream rev 5eed2e2
+# plus (1) the fw11 fix that drops the fw12-only VDO_ERROR_NO_VIDEO arm, so `vdo`
+# compiles against BOTH the firmware-11 SDK 1.15.1 and firmware-12 SDK sysroots,
+# (2) RunningStream::force_key_frame, and (3) joining an existing encode
+# (list_streams, Stream::from_settings, Stream::id, RunningStream::info and the
+# non-blocking next_buffer). Back to upstream once these land there.
+vdo          = { git = "https://github.com/fishloa/acap-rs", rev = "c7f61bd80b21acb641ccce82ddc3b923c1927d72", optional = true }
+axparameter  = { git = "https://github.com/fishloa/acap-rs", rev = "c7f61bd80b21acb641ccce82ddc3b923c1927d72", optional = true }
+acap-logging = { git = "https://github.com/fishloa/acap-rs", rev = "c7f61bd80b21acb641ccce82ddc3b923c1927d72", optional = true }
+acap-vapix   = { git = "https://github.com/fishloa/acap-rs", rev = "c7f61bd80b21acb641ccce82ddc3b923c1927d72", optional = true }
 # `VdoIngestSession` (src/vdo_source.rs, device-gated) implements
 # `media_plane::ingress`'s `Stage`/`IngestSession` traits directly — multimux
 # 0.5 (issue #805) deleted `multimux::pipeline::{run_pipeline, SampleSource}`
