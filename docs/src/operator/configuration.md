@@ -55,7 +55,7 @@ The configuration is a JSON object with the following top-level keys:
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `max_encodes` | integer | `2` | Maximum concurrent encodes (range 1–8). When the limit is reached, new stream requests receive a 503 response. The ARTPEC-6 (P1448-LE) camera handles about 2 distinct encodes; 3 or more will slow every stream to 15–18 fps (see Known limitation below). Other clients (e.g., a VMS) share this limit. |
+| `max_encodes` | integer | `2` | Maximum concurrent encodes of the app's own (range 1–8). When the limit is reached, a stream that would need a new encode receives a 503 response. Streams that join an encode the camera already runs don't count (see [Sharing the camera's encodes](#sharing-the-cameras-encodes)). The camera's other clients (e.g., a VMS) use the same encoder budget. |
 | `idle_timeout_secs` | integer | `30` | Seconds of inactivity after which an idle stream shuts down its encode (range 5–600). This frees encoder resources for other streams. |
 
 ### LL-HLS Parameters
@@ -198,8 +198,33 @@ A `POST /admin/config` is rejected with `400 Bad Request` if:
 A missing or unavailable profile shows up later as a 503 `camera profile "X" not found`
 or `profile source unavailable: …` error when a stream URL is accessed.
 
-> **Known limitation:** on the P1448-LE (ARTPEC-6, AXIS OS 11.11), setting any
-explicit key-frame interval caps 4K capture at ~18 fps (the camera's default
-gives 25 fps, also over its own RTSP). The app no longer forces a key-frame
-interval; it only applies one when the stream profile sets
-`videokeyframeinterval`, so avoid setting it on 4K profiles.
+### Sharing the camera's encodes
+
+The camera's hardware encoder has a fixed budget: the P1448-LE (ARTPEC-6)
+fits about one and a half 4K25 encodes. The camera's own RTSP server keeps
+its encodes running for its clients (a VMS recording `ACC_High`, say), and
+a second client asking for the same stream joins that encode for free.
+
+Multimux Edge does the same. Before it starts an encode for a stream, it
+looks for one the camera is already running with the same camera, codec,
+resolution and frame rate (and key-frame interval, if the profile sets one)
+and joins it. A joined stream:
+
+- costs the encoder nothing, so it runs at the full rate (4K at 25 fps)
+  and doesn't slow the camera's other clients;
+- carries the existing encode's compression, Zipstream and overlay settings;
+- shows `"shared_encode": true` in `/admin/status` and doesn't count
+  against `max_encodes`;
+- keeps running if the client that started the encode disconnects.
+
+A stream that has nothing to join gets an encode of its own, which counts
+against `max_encodes`. Every distinct encode shares the encoder budget, as
+it would for an RTSP client: on the P1448-LE, a 4K stream plus two more
+distinct encodes (say 1080p and 720p) bring everything down to about
+20 fps.
+
+Profiles without `camera=` use camera 1, as the camera's RTSP server does,
+so a mapped profile matches the camera's own stream for that profile.
+
+Setting `videokeyframeinterval` on a profile only joins an encode with
+that exact interval; otherwise the stream starts its own encode.
