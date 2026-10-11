@@ -47,7 +47,7 @@
 
     <section id="encoder" class="panel">
       <h2>Encoder</h2>
-      <p class="hint">The camera runs about 2 distinct encodes at full frame rate (ARTPEC-6); a third slows every stream. Other clients such as a VMS share the same encoder.</p>
+      <p class="hint">Max encodes counts the app&rsquo;s own encodes. A stream that joins an encode the camera already runs for its other clients (marked &ldquo;shared encode&rdquo; below) costs nothing and doesn&rsquo;t count. Every distinct encode shares the camera&rsquo;s encoder (the ARTPEC-6 fits about one and a half 4K25 encodes).</p>
       <div class="fields">
         <label>Max encodes<input id="f-max-encodes" type="number" min="1" max="8"></label>
         <label>Stop idle stream after (s)<input id="f-idle" type="number" min="5" max="600"></label>
