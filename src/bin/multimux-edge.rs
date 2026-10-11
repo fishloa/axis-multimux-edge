@@ -273,6 +273,7 @@ async fn run_vdo_capture(
     let session = VdoIngestSession::new(settings, stop).map_err(|e| MultimuxError::Connect {
         reason: format!("VdoIngestSession init failed: {e}"),
     })?;
+    status.set_shared_encode(session.shared_encode().is_some());
 
     let trunk_config = TrunkConfig::new(
         source_nz(DRIVER_TIMED_CAPACITY),

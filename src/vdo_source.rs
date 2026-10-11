@@ -103,7 +103,7 @@ use broadcast_common::{Demand, Stage, Timestamp};
 use media_plane::ingress::{IngestSession, ProgramId, SessionEvent};
 use media_plane::trunk::RetentionClass;
 use transmux::pipeline::{Sample, TrackSpec};
-use vdo::{Resolution, RunningStream, StreamBuilder, VdoFormat, VdoFrameType};
+use vdo::{Map, Resolution, RunningStream, Stream, StreamBuilder, VdoFormat, VdoFrameType};
 
 use crate::Result;
 use crate::convert::{self, Codec, ParamSets};
@@ -124,7 +124,8 @@ const CLOCK_RATE: u32 = 90_000;
 const SCAN_WARN_INTERVAL: Duration = Duration::from_secs(10);
 
 /// How often `scan_for_param_sets` re-asks VDO for a key frame while waiting.
-/// The first request goes out before the first buffer read; repeats cover a
+/// For an encode of our own the first request goes out before the first
+/// buffer read; on a joined encode it waits one interval. Repeats cover a
 /// request that lands on frames already queued ahead of it.
 const FORCE_KEY_FRAME_INTERVAL: Duration = Duration::from_secs(2);
 
@@ -168,6 +169,8 @@ pub struct VdoIngestSession {
     /// `vdo::RunningStream` (a raw C handle) is `Send` but not `Sync`. Never
     /// actually locked: the only access is `Mutex::get_mut` from `&mut self`.
     running: Mutex<RunningStream>,
+    /// Id of the existing encode this session joined, if it joined one.
+    shared_encode: Option<u32>,
     track_id: u32,
     codec: Codec,
     clock_rate: u32,
@@ -216,33 +219,46 @@ impl VdoIngestSession {
             framerate,
             gop_length,
         } = *settings;
-        let format = match codec {
-            Codec::H264 => VdoFormat::VDO_FORMAT_H264,
-            Codec::H265 => VdoFormat::VDO_FORMAT_H265,
+        let (stream, shared_encode) = match join_existing_encode(settings) {
+            Some(joined) => joined,
+            None => {
+                let format = match codec {
+                    Codec::H264 => VdoFormat::VDO_FORMAT_H264,
+                    Codec::H265 => VdoFormat::VDO_FORMAT_H265,
+                };
+                // Only set a GOP length when the profile asks for one; otherwise
+                // the camera default stands and `scan_for_param_sets` waits
+                // for the next key frame, however far off dynamic GOP /
+                // Zipstream puts it (#669).
+                let mut builder = StreamBuilder::new()
+                    .channel(channel)
+                    .format(format)
+                    .resolution(Resolution::Exact { width, height })
+                    .framerate(framerate);
+                if let Some(gop) = gop_length {
+                    builder = builder.gop_length(gop);
+                }
+                let stream = builder.build()?;
+                log::info!(
+                    "vdo: new encode {} for {}",
+                    stream.id(),
+                    settings.describe()
+                );
+                (stream, None)
+            }
         };
-
-        // Only set a GOP length when the profile asks for one. Any explicit GOP
-        // caps 4K throughput at ~18 fps on ARTPEC-6 (the camera default gives
-        // 25 fps), so otherwise the camera default stands and
-        // `scan_for_param_sets` simply waits for the next key frame, however
-        // far off dynamic GOP / Zipstream puts it (#669).
-        let mut builder = StreamBuilder::new()
-            .channel(channel)
-            .format(format)
-            .resolution(Resolution::Exact { width, height })
-            .framerate(framerate);
-        if let Some(gop) = gop_length {
-            builder = builder.gop_length(gop);
-        }
-        let stream = builder.build()?;
 
         let running = stream.start()?;
 
-        let (params, pending_first) = scan_for_param_sets(&running, codec, stop)?;
+        // Forcing a key frame on a joined encode adds one for everyone using
+        // it, so there the scan first gives the encode's own GOP a chance.
+        let (params, pending_first) =
+            scan_for_param_sets(&running, codec, stop, shared_encode.is_none())?;
         let spec = convert::track_spec(codec, &params, TRACK_ID, CLOCK_RATE)?;
 
         Ok(Self {
             running: Mutex::new(running),
+            shared_encode,
             track_id: TRACK_ID,
             codec,
             clock_rate: CLOCK_RATE,
@@ -257,6 +273,12 @@ impl VdoIngestSession {
             diag_min_delta_us: None,
             diag_max_delta_us: None,
         })
+    }
+
+    /// The VDO id of the existing encode this session joined, or `None` if
+    /// it runs an encode of its own.
+    pub fn shared_encode(&self) -> Option<u32> {
+        self.shared_encode
     }
 
     /// Read exactly one more coded-picture buffer from VDO (blocking; skips
@@ -285,7 +307,7 @@ impl VdoIngestSession {
             self.diag_prev_ts_us = Some(ts);
             self.diag_buffers += 1;
             if self.diag_buffers >= DIAG_WINDOW {
-                log::info!(
+                log::debug!(
                     "vdo diag: {} buffers by type {:?}, ts delta us min={:?} max={:?}",
                     self.diag_buffers,
                     self.diag_counts,
@@ -319,6 +341,77 @@ impl VdoIngestSession {
     }
 }
 
+/// Join an encode the camera already runs, if one delivers `want`. The
+/// encoder fits about one and a half 4K25 encodes and the camera's RTSP
+/// server keeps sharable encodes running for its clients; VDO hands a new
+/// stream the *same* encode when its settings are an exact copy of a
+/// sharable stream's, so joining costs the encoder nothing (see
+/// [`crate::vdo_share`]). Returns the stream and the joined encode's id, or
+/// `None` (logged) to fall back to an encode of our own.
+fn join_existing_encode(want: &crate::profile::CaptureSettings) -> Option<(Stream, Option<u32>)> {
+    let streams = match vdo::list_streams() {
+        Ok(streams) => streams,
+        Err(e) => {
+            log::warn!("vdo: can't list streams to share an encode: {e}");
+            return None;
+        }
+    };
+    let descs: Vec<crate::vdo_share::StreamDesc> = streams.iter().map(describe_stream).collect();
+    log::debug!("vdo: existing streams {descs:?}");
+    let id = crate::vdo_share::pick_shareable(&descs, want)?;
+    let existing = streams.iter().find(|s| s.id == id)?;
+    let mut copy = existing.settings.clone();
+    for key in [c"id", c"identity", c"intent"] {
+        copy.remove(key);
+    }
+    let stream = match StreamBuilder::from_settings(copy).build() {
+        Ok(stream) => stream,
+        Err(e) => {
+            log::warn!("vdo: joining encode {id} failed, starting our own: {e}");
+            return None;
+        }
+    };
+    let identity = existing
+        .settings
+        .get_string(c"identity")
+        .map(|s| s.as_c_str().to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if stream.id() == id {
+        log::info!(
+            "vdo: joined encode {id} ({identity}) for {}",
+            want.describe()
+        );
+        Some((stream, Some(id)))
+    } else {
+        // VDO started a separate encode after all; keep it, but don't
+        // claim it is shared.
+        log::warn!(
+            "vdo: asked to join encode {id} ({identity}) but got new encode {}",
+            stream.id()
+        );
+        Some((stream, None))
+    }
+}
+
+/// The settings of an existing VDO stream that [`crate::vdo_share`] matches on.
+fn describe_stream(s: &vdo::StreamInfo) -> crate::vdo_share::StreamDesc {
+    let m: &Map = &s.settings;
+    let mut framerate = m.get_u32(c"framerate", 0);
+    if framerate == 0 {
+        framerate = m.get_f64(c"framerate", 0.0).round() as u32;
+    }
+    crate::vdo_share::StreamDesc {
+        id: s.id,
+        sharable: m.get_bool(c"sharable", false),
+        channel: m.get_u32(c"channel", u32::MAX),
+        format: m.get_u32(c"format", u32::MAX),
+        width: m.get_u32(c"width", 0),
+        height: m.get_u32(c"height", 0),
+        framerate,
+        gop_length: m.get_u32(c"gop_length", 0),
+    }
+}
+
 /// Read buffers from `running` until the parameter sets (SPS/PPS for H.264;
 /// VPS/SPS/PPS for H.265) can be resolved, returning them plus the key-frame
 /// access unit as a [`PendingAu`]. There is no buffer limit: it waits as long
@@ -339,6 +432,7 @@ fn scan_for_param_sets(
     running: &RunningStream,
     codec: Codec,
     stop: &AtomicBool,
+    force_at_start: bool,
 ) -> Result<(ParamSets, PendingAu)> {
     // Fallback path: latest Annex B bytes for each separately-delivered
     // parameter-set NAL, kept individually so a resent run replaces it.
@@ -348,7 +442,9 @@ fn scan_for_param_sets(
 
     let started = Instant::now();
     let mut last_warn = started;
-    let mut last_force: Option<Instant> = None;
+    // `None` forces before the first read; otherwise the first force waits
+    // one interval.
+    let mut last_force: Option<Instant> = if force_at_start { None } else { Some(started) };
     let mut seen: usize = 0;
     loop {
         // Ask for a key frame now rather than waiting out the camera's GOP.
