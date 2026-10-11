@@ -190,7 +190,15 @@
       body.replaceChildren();
       for (const st of s.streams) {
         const tr = document.createElement("tr");
-        tr.append(cell(st.names.join(", ")), cell(st.settings), cell(st.state, "state-" + st.state),
+        const capture = cell(st.settings);
+        if (st.shared_encode) {
+          const chip = document.createElement("span");
+          chip.className = "chip";
+          chip.textContent = "shared encode";
+          chip.title = "Joined an encode the camera was already running; costs the encoder nothing";
+          capture.append(" ", chip);
+        }
+        tr.append(cell(st.names.join(", ")), capture, cell(st.state, "state-" + st.state),
           cell(String(st.fps)), cell(st.idle_secs + " s"), cell(st.last_error || "—"));
         body.append(tr);
       }
