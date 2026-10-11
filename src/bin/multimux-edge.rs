@@ -47,7 +47,7 @@
 //! the stop flag so the capture loop returns and frees the VDO stream.
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use broadcast_common::Timestamp;
 use log::{error, info};
@@ -55,7 +55,7 @@ use media_plane::ingress::{HandshakePolicy, IngestDriver};
 use media_plane::trunk::TrunkConfig;
 use multimux::source::{DriverProgress, advance_route};
 use multimux::{Backoff, MultimuxError, RouteHandle};
-use multimux_edge::admin::{self, AxParameterStore, ConfigStore, StatusHandle};
+use multimux_edge::admin::{self, AxParameterStore, ConfigStore, EncodeShare, StatusHandle};
 use multimux_edge::profile::CaptureSettings;
 use multimux_edge::profile_source::{BoxFuture, VapixProfileSource};
 use multimux_edge::registry::{CaptureFactory, CaptureHandle, Registry};
@@ -187,11 +187,15 @@ struct VdoCaptureFactory;
 impl CaptureFactory for VdoCaptureFactory {
     fn joinable(&self, settings: CaptureSettings) -> BoxFuture<'static, bool> {
         Box::pin(async move {
-            tokio::task::spawn_blocking(move || {
+            let probe = tokio::task::spawn_blocking(move || {
                 multimux_edge::vdo_source::can_join_existing_encode(&settings)
-            })
-            .await
-            .unwrap_or(false)
+            });
+            // VDO answers in milliseconds; don't let a stuck daemon hold up
+            // the request. Unknown counts as not joinable.
+            matches!(
+                tokio::time::timeout(Duration::from_secs(2), probe).await,
+                Ok(Ok(true))
+            )
         })
     }
 
@@ -280,12 +284,15 @@ async fn run_vdo_capture(
     if stop.load(Ordering::Relaxed) {
         return Ok(());
     }
-    let shared_status = status.clone();
-    let on_shared = Box::new(move |shared: bool| shared_status.set_shared_encode(shared));
-    let session =
-        VdoIngestSession::new(settings, stop, on_shared).map_err(|e| MultimuxError::Connect {
+    let encode_status = status.clone();
+    let on_encode = Box::new(move |encode: EncodeShare| encode_status.set_encode(encode));
+    let session = VdoIngestSession::new(settings, stop, on_encode).map_err(|e| {
+        // No encode running now; count it as needing its own until a retry opens.
+        status.set_encode(EncodeShare::Pending { joinable: false });
+        MultimuxError::Connect {
             reason: format!("VdoIngestSession init failed: {e}"),
-        })?;
+        }
+    })?;
 
     let trunk_config = TrunkConfig::new(
         source_nz(DRIVER_TIMED_CAPACITY),

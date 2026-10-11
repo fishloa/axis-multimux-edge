@@ -277,9 +277,27 @@ pub struct Status {
     pub frames: u64,
     /// The most recent pipeline error, if any, as its `Display` text.
     pub last_error: Option<String>,
-    /// The capture joined an encode the camera was already running (for
-    /// its RTSP clients, say), so it costs the encoder nothing.
-    pub shared_encode: bool,
+    /// How the capture's encode relates to the camera's other clients.
+    pub encode: EncodeShare,
+}
+
+/// How a capture's encode relates to the camera's other clients.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EncodeShare {
+    /// Not open yet. `joinable`: expected to join an encode the camera
+    /// already runs.
+    Pending { joinable: bool },
+    /// An encode of its own.
+    Own,
+    /// Joined the camera's encode `id`, which has `peers` clients in all
+    /// (0 = not reported).
+    Joined { id: u32, peers: u32 },
+}
+
+impl Default for EncodeShare {
+    fn default() -> Self {
+        EncodeShare::Pending { joinable: false }
+    }
 }
 
 /// Internal state behind [`StatusHandle`]: the served [`Status`] plus a
@@ -334,13 +352,9 @@ impl StatusHandle {
         state.status.current_part = current_part;
     }
 
-    /// Record whether the capture joined an existing encode.
-    pub fn set_shared_encode(&self, shared: bool) {
-        self.0
-            .lock()
-            .expect("status mutex poisoned")
-            .status
-            .shared_encode = shared;
+    /// Record how the capture's encode relates to the camera's other clients.
+    pub fn set_encode(&self, encode: EncodeShare) {
+        self.0.lock().expect("status mutex poisoned").status.encode = encode;
     }
 
     /// Add `n` to the processed-frame counter.

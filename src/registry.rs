@@ -14,7 +14,7 @@ use multimux::RouteHandle;
 use multimux::origin::{AppState, router};
 use multimux::output::OutputKind;
 
-use crate::admin::StatusHandle;
+use crate::admin::{EncodeShare, StatusHandle};
 use crate::config::{Config, MAIN_NAME};
 use crate::profile::{CaptureSettings, parse_profile};
 use crate::profile_source::{BoxFuture, ProfileSource};
@@ -194,7 +194,7 @@ impl Registry {
             // a short idle timeout cannot sweep it on the very next tick.
             let stamp = now.max(Instant::now());
             let max = inner.config.max_encodes;
-            let in_use = own_encodes(&inner.captures);
+            let in_use = EncodeTally::of(&inner.captures).own;
             if !joinable && in_use >= max {
                 return Err(ServeError::EncoderBusy { in_use, max });
             }
@@ -211,7 +211,7 @@ impl Registry {
             );
             let router = router(Arc::new(AppState::new(streams)));
             let status = StatusHandle::new();
-            status.set_shared_encode(joinable);
+            status.set_encode(EncodeShare::Pending { joinable });
             let handle = self.factory.start(
                 settings,
                 route,
@@ -280,6 +280,7 @@ impl Registry {
 
     pub fn snapshot(&self, now: Instant) -> RegistryStatus {
         let inner = self.lock();
+        let usage = EncodeTally::of(&inner.captures);
         let mut streams: Vec<StreamStatus> = inner
             .captures
             .values()
@@ -308,14 +309,14 @@ impl Registry {
                     },
                     idle_secs: now.saturating_duration_since(c.last_used).as_secs(),
                     last_error: st.last_error,
-                    shared_encode: st.shared_encode,
+                    shared_encode: usage.shares(st.encode),
                 }
             })
             .collect();
         streams.sort_by(|a, b| a.names.cmp(&b.names));
         RegistryStatus {
             encodes: EncodeUsage {
-                in_use: own_encodes(&inner.captures),
+                in_use: usage.own,
                 max: inner.config.max_encodes,
             },
             streams,
@@ -323,14 +324,59 @@ impl Registry {
     }
 }
 
-/// Captures running an encode of their own. One that joined an existing
-/// encode costs the encoder nothing, so it doesn't count against
-/// `max_encodes`.
-fn own_encodes(captures: &HashMap<CaptureSettings, Capture>) -> u32 {
-    captures
-        .values()
-        .filter(|c| !c.status.snapshot().shared_encode)
-        .count() as u32
+/// How many encodes our captures run, for `max_encodes`. A capture on an
+/// encode of its own counts; one that joined an encode the camera already
+/// runs doesn't, as long as some other client still uses that encode. Our
+/// captures on the same joined encode are grouped: once its `peers` are all
+/// ours, the group carries the encode alone and it counts once.
+struct EncodeTally {
+    own: u32,
+    /// Joined encode id -> (our captures on it, its reported peers).
+    joined: HashMap<u32, (u32, u32)>,
+}
+
+impl EncodeTally {
+    fn of(captures: &HashMap<CaptureSettings, Capture>) -> Self {
+        let mut tally = EncodeTally {
+            own: 0,
+            joined: HashMap::new(),
+        };
+        for c in captures.values() {
+            match c.status.snapshot().encode {
+                EncodeShare::Own | EncodeShare::Pending { joinable: false } => tally.own += 1,
+                EncodeShare::Pending { joinable: true } => {}
+                EncodeShare::Joined { id, peers } => {
+                    let entry = tally.joined.entry(id).or_default();
+                    entry.0 += 1;
+                    entry.1 = entry.1.max(peers);
+                }
+            }
+        }
+        let alone = tally
+            .joined
+            .keys()
+            .filter(|id| !tally.foreign_client(**id))
+            .count() as u32;
+        tally.own += alone;
+        tally
+    }
+
+    /// Whether encode `id` still has a client other than our captures
+    /// (unknown peers count as yes).
+    fn foreign_client(&self, id: u32) -> bool {
+        self.joined
+            .get(&id)
+            .is_some_and(|&(ours, peers)| peers == 0 || peers > ours)
+    }
+
+    /// Whether a capture in state `encode` currently costs the encoder nothing.
+    fn shares(&self, encode: EncodeShare) -> bool {
+        match encode {
+            EncodeShare::Pending { joinable } => joinable,
+            EncodeShare::Own => false,
+            EncodeShare::Joined { id, .. } => self.foreign_client(id),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -373,6 +419,7 @@ pub(crate) mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::admin::EncodeShare;
     use crate::config::StreamMapping;
     use crate::profile_source::{CameraProfile, StaticProfileSource};
 
@@ -840,6 +887,50 @@ pub(crate) mod tests {
         ));
         counts.share.store(true, Ordering::SeqCst);
         reg.ensure("hi", t0).await.unwrap();
+        assert_eq!(reg.snapshot(t0).encodes.in_use, 1);
+    }
+
+    fn status_of(reg: &Registry, name: &str) -> StatusHandle {
+        reg.lock()
+            .captures
+            .values()
+            .find(|c| c.names.contains(name))
+            .unwrap()
+            .status
+            .clone()
+    }
+
+    #[tokio::test]
+    async fn a_joined_encode_counts_once_no_foreign_client_is_left() {
+        let (reg, counts, _) = setup(&[("hi", "ACC_High"), ("lo", "ACC_Low")]);
+        counts.share.store(true, Ordering::SeqCst);
+        let t0 = Instant::now();
+        reg.ensure("hi", t0).await.unwrap();
+        reg.ensure("lo", t0).await.unwrap();
+        // Both of our captures joined the same foreign encode 71.
+        status_of(&reg, "hi").set_encode(EncodeShare::Joined { id: 71, peers: 3 });
+        status_of(&reg, "lo").set_encode(EncodeShare::Joined { id: 71, peers: 3 });
+        let s = reg.snapshot(t0);
+        assert_eq!(s.encodes.in_use, 0);
+        assert!(s.streams.iter().all(|st| st.shared_encode));
+        // The foreign client leaves: only our two captures remain on it.
+        status_of(&reg, "hi").set_encode(EncodeShare::Joined { id: 71, peers: 2 });
+        status_of(&reg, "lo").set_encode(EncodeShare::Joined { id: 71, peers: 2 });
+        let s = reg.snapshot(t0);
+        assert_eq!(s.encodes.in_use, 1);
+        assert!(s.streams.iter().all(|st| !st.shared_encode));
+    }
+
+    #[tokio::test]
+    async fn a_capture_that_ends_up_on_its_own_encode_counts() {
+        let (reg, counts, _) = setup(&[("hi", "ACC_High")]);
+        counts.share.store(true, Ordering::SeqCst);
+        let t0 = Instant::now();
+        reg.ensure("hi", t0).await.unwrap();
+        assert_eq!(reg.snapshot(t0).encodes.in_use, 0);
+        status_of(&reg, "hi").set_encode(EncodeShare::Own);
+        assert_eq!(reg.snapshot(t0).encodes.in_use, 1);
+        status_of(&reg, "hi").set_encode(EncodeShare::Joined { id: 9, peers: 1 });
         assert_eq!(reg.snapshot(t0).encodes.in_use, 1);
     }
 }

@@ -38,10 +38,10 @@ tower     = { version = "0.5", features = ["util"] }
 # (2) RunningStream::force_key_frame, and (3) joining an existing encode
 # (list_streams, Stream::from_settings, Stream::id, RunningStream::info and the
 # non-blocking next_buffer). Back to upstream once these land there.
-vdo          = { git = "https://github.com/fishloa/acap-rs", rev = "c7f61bd80b21acb641ccce82ddc3b923c1927d72", optional = true }
-axparameter  = { git = "https://github.com/fishloa/acap-rs", rev = "c7f61bd80b21acb641ccce82ddc3b923c1927d72", optional = true }
-acap-logging = { git = "https://github.com/fishloa/acap-rs", rev = "c7f61bd80b21acb641ccce82ddc3b923c1927d72", optional = true }
-acap-vapix   = { git = "https://github.com/fishloa/acap-rs", rev = "c7f61bd80b21acb641ccce82ddc3b923c1927d72", optional = true }
+vdo          = { git = "https://github.com/fishloa/acap-rs", rev = "6791003e0d5d5fd5fbed58cd9b275083a584f64d", optional = true }
+axparameter  = { git = "https://github.com/fishloa/acap-rs", rev = "6791003e0d5d5fd5fbed58cd9b275083a584f64d", optional = true }
+acap-logging = { git = "https://github.com/fishloa/acap-rs", rev = "6791003e0d5d5fd5fbed58cd9b275083a584f64d", optional = true }
+acap-vapix   = { git = "https://github.com/fishloa/acap-rs", rev = "6791003e0d5d5fd5fbed58cd9b275083a584f64d", optional = true }
 # `VdoIngestSession` (src/vdo_source.rs, device-gated) implements
 # `media_plane::ingress`'s `Stage`/`IngestSession` traits directly — multimux
 # 0.5 (issue #805) deleted `multimux::pipeline::{run_pipeline, SampleSource}`
