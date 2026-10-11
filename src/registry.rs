@@ -933,4 +933,20 @@ pub(crate) mod tests {
         status_of(&reg, "hi").set_encode(EncodeShare::Joined { id: 9, peers: 1 });
         assert_eq!(reg.snapshot(t0).encodes.in_use, 1);
     }
+
+    #[tokio::test]
+    async fn unknown_peers_count_as_shared_and_own_encodes_still_count() {
+        let (reg, counts, _) = setup(&[("hi", "ACC_High")]);
+        counts.share.store(true, Ordering::SeqCst);
+        let t0 = Instant::now();
+        reg.ensure("hi", t0).await.unwrap();
+        status_of(&reg, "hi").set_encode(EncodeShare::Joined { id: 71, peers: 0 });
+        counts.share.store(false, Ordering::SeqCst);
+        reg.ensure("main", t0).await.unwrap();
+        status_of(&reg, "main").set_encode(EncodeShare::Own);
+        let s = reg.snapshot(t0);
+        assert_eq!(s.encodes.in_use, 1);
+        let shared: Vec<bool> = s.streams.iter().map(|st| st.shared_encode).collect();
+        assert_eq!(shared, vec![true, false]); // sorted by name: hi, main
+    }
 }

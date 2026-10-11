@@ -268,9 +268,11 @@ impl VdoIngestSession {
         };
 
         let running = stream.start()?;
-        let peers = shared_encode.map_or(0, |_| encode_peers(&running));
+        // A joined encode's peers right after start() may not include us
+        // yet; report them as unknown (counted as shared) until the first
+        // peer check.
         on_encode(match shared_encode {
-            Some(id) => EncodeShare::Joined { id, peers },
+            Some(id) => EncodeShare::Joined { id, peers: 0 },
             None => EncodeShare::Own,
         });
 
@@ -284,7 +286,7 @@ impl VdoIngestSession {
             running: Mutex::new(running),
             shared_encode,
             on_encode,
-            last_peers: peers,
+            last_peers: 0,
             last_peer_check: Instant::now(),
             track_id: TRACK_ID,
             codec,

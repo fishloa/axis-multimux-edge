@@ -262,6 +262,17 @@ impl CaptureFactory for VdoCaptureFactory {
     }
 }
 
+/// Sets a capture's encode back to `Pending { joinable: false }` when a
+/// capture attempt ends, so a stale `Own`/`Joined` doesn't linger while
+/// `supervise_driver` backs off before retrying.
+struct ResetEncodeOnExit(StatusHandle);
+
+impl Drop for ResetEncodeOnExit {
+    fn drop(&mut self) {
+        self.0.set_encode(EncodeShare::Pending { joinable: false });
+    }
+}
+
 /// One VDO-capture attempt — the closure [`multimux::supervise_driver`]
 /// retries with backoff. Opens the VDO channel
 /// ([`VdoIngestSession::new`]), wraps it in an
@@ -284,15 +295,15 @@ async fn run_vdo_capture(
     if stop.load(Ordering::Relaxed) {
         return Ok(());
     }
+    // However this attempt ends, no encode runs until the next one opens;
+    // count the capture as needing its own until then.
+    let _reset = ResetEncodeOnExit(status.clone());
     let encode_status = status.clone();
     let on_encode = Box::new(move |encode: EncodeShare| encode_status.set_encode(encode));
-    let session = VdoIngestSession::new(settings, stop, on_encode).map_err(|e| {
-        // No encode running now; count it as needing its own until a retry opens.
-        status.set_encode(EncodeShare::Pending { joinable: false });
-        MultimuxError::Connect {
+    let session =
+        VdoIngestSession::new(settings, stop, on_encode).map_err(|e| MultimuxError::Connect {
             reason: format!("VdoIngestSession init failed: {e}"),
-        }
-    })?;
+        })?;
 
     let trunk_config = TrunkConfig::new(
         source_nz(DRIVER_TIMED_CAPACITY),
