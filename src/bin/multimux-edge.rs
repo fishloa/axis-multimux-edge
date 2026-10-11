@@ -20,9 +20,9 @@
 //! # Threading
 //!
 //! [`VdoIngestSession::feed`](broadcast_common::Stage::feed) ultimately calls
-//! `vdo::RunningStream::next_buffer`, a **blocking** FFI call into
-//! `libvdo.so` that only returns once the camera has produced the next frame
-//! (see `vdo_source.rs`'s module doc). Running that on an axum worker thread
+//! `vdo::RunningStream::next_buffer_timeout`, a **blocking** FFI call into
+//! `libvdo.so` that returns once the camera has produced the next frame or
+//! a second has passed (see `vdo_source.rs`'s module doc). Running that on an axum worker thread
 //! would eventually starve every request being served on the same
 //! `rt-multi-thread` runtime once all worker threads happen to be parked in
 //! that blocking call. Instead each capture's whole capture/segment/store

@@ -49,8 +49,9 @@
 //!
 //! # Blocking I/O — run on a dedicated thread or task
 //!
-//! [`vdo::RunningStream::next_buffer`] **blocks the calling thread** until the
-//! camera produces the next frame (it is a synchronous FFI call into
+//! [`vdo::RunningStream::next_buffer_timeout`] **blocks the calling thread**
+//! until the camera produces the next frame or [`READ_TIMEOUT`] passes, so a
+//! quiet channel still lets the caller check `stop` (it is a synchronous FFI call into
 //! `libvdo.so`, not a `poll`-based async I/O source). `VdoIngestSession::feed`
 //! calls it directly and therefore blocks too. **Whoever drives the VDO
 //! capture loop (`src/bin/multimux-edge.rs`'s `run_vdo_capture`, spawned by
@@ -72,8 +73,9 @@
 //! - `vdo::StreamBuilder::{channel, format, resolution, framerate}` + `.build()`
 //!   (`crates/vdo/src/lib.rs`).
 //! - `vdo::Stream::start() -> RunningStream` (consumes `self`).
-//! - `vdo::RunningStream::next_buffer(&self) -> Result<StreamBuffer<'_>, vdo::Error>`
-//!   (blocking, see above).
+//! - `vdo::RunningStream::next_buffer_timeout(&self, Duration) ->
+//!   Result<Option<StreamBuffer<'_>>, vdo::Error>` (blocking up to the timeout,
+//!   see above).
 //! - `vdo::StreamBuffer::{data_copy, as_slice, header_size, frame_type,
 //!   timestamp}` — `data_copy()` returns the coded slice with the buffer's
 //!   header (`header_size` bytes) stripped, which is exactly the CMAF sample
@@ -128,6 +130,10 @@ const PEER_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 /// How often `scan_for_param_sets` logs that it is still waiting for a key frame.
 const SCAN_WARN_INTERVAL: Duration = Duration::from_secs(10);
 
+/// The longest a read waits for a frame before handing control back, so a
+/// channel that stops producing frames can't keep a capture from stopping.
+const READ_TIMEOUT: Duration = Duration::from_secs(1);
+
 /// How often `scan_for_param_sets` re-asks VDO for a key frame while waiting.
 /// For an encode of our own the first request goes out before the first
 /// buffer read; on a joined encode it waits one interval. Repeats cover a
@@ -167,7 +173,7 @@ struct PendingAu {
 /// [`SessionEvent::Established`] and [`SessionEvent::NewProgram`] are already
 /// queued and ready the moment the caller starts driving. Every subsequent
 /// [`feed`](Stage::feed) call blocks (see the module doc) on
-/// [`RunningStream::next_buffer`].
+/// [`RunningStream::next_buffer_timeout`].
 pub struct VdoIngestSession {
     /// In a `Mutex` only to make the session `Sync`: multimux 0.11's async
     /// `advance_route` holds `&IngestDriver<Self>` across an `.await`, and
@@ -305,15 +311,18 @@ impl VdoIngestSession {
     /// Read exactly one more coded-picture buffer from VDO (blocking; skips
     /// any interleaved parameter-set/SEI buffers exactly like
     /// [`scan_for_param_sets`]'s own skip loop), and turn it into a
-    /// [`Sample`].
-    fn read_next_sample(&mut self) -> Result<Sample> {
+    /// [`Sample`]; `None` if no frame came within [`READ_TIMEOUT`].
+    fn read_next_sample(&mut self) -> Result<Option<Sample>> {
         self.check_peers();
         loop {
-            let buf = self
+            let Some(buf) = self
                 .running
                 .get_mut()
                 .unwrap_or_else(PoisonError::into_inner)
-                .next_buffer()?;
+                .next_buffer_timeout(READ_TIMEOUT)?
+            else {
+                return Ok(None);
+            };
             let ft = buf.frame_type();
             let ts = buf.timestamp();
             // Diagnostic counters (see the `diag_*` fields).
@@ -356,9 +365,9 @@ impl VdoIngestSession {
             );
             self.prev_ts_us = Some(timestamp_us);
             let pts_dts = convert::absolute_ticks(timestamp_us, self.clock_rate);
-            return Ok(convert::au_to_sample(
+            return Ok(Some(convert::au_to_sample(
                 self.codec, &data, pts_dts, duration, is_sync,
-            ));
+            )));
         }
     }
 }
@@ -582,9 +591,6 @@ fn scan_for_param_sets(
                 );
             }
         }
-        let buf = running.next_buffer()?;
-        let i = seen;
-        seen += 1;
         if stop.load(Ordering::Relaxed) {
             return Err(OriginError::Convert(
                 "capture stopped while waiting for a key frame".into(),
@@ -598,6 +604,11 @@ fn scan_for_param_sets(
                 seen,
             );
         }
+        let Some(buf) = running.next_buffer_timeout(READ_TIMEOUT)? else {
+            continue;
+        };
+        let i = seen;
+        seen += 1;
         let ft = buf.frame_type();
         let data = buf.data_copy()?;
         if let Some(kind) = param_set_kind(codec, ft) {
@@ -757,8 +768,9 @@ impl Stage for VdoIngestSession {
     /// buffered key-frame [`SessionEvent::Sample`], all without touching VDO
     /// again (everything needed was already resolved synchronously in
     /// `new()`). **Every call after that** blocks on
-    /// [`RunningStream::next_buffer`] (via [`Self::read_next_sample`]) and
-    /// queues exactly one more [`SessionEvent::Sample`]. A live camera
+    /// [`RunningStream::next_buffer_timeout`] (via [`Self::read_next_sample`])
+    /// and queues one more [`SessionEvent::Sample`], or none if no frame came
+    /// within [`READ_TIMEOUT`]. A live camera
     /// channel has no natural end-of-stream, so a VDO read/convert failure
     /// here is reported as `Err` (driving [`media_plane::ingress::HealthState::Failed`])
     /// rather than a clean [`Stage::finish`].
@@ -799,13 +811,16 @@ impl Stage for VdoIngestSession {
             return Ok(());
         }
 
-        let sample = self.read_next_sample()?;
-        self.pending.push_back(SessionEvent::Sample {
-            program: PROGRAM,
-            track_id: self.track_id,
-            retention: RetentionClass::Timed,
-            sample,
-        });
+        // No frame within the read timeout: return so the caller can check
+        // whether to stop, and feed again.
+        if let Some(sample) = self.read_next_sample()? {
+            self.pending.push_back(SessionEvent::Sample {
+                program: PROGRAM,
+                track_id: self.track_id,
+                retention: RetentionClass::Timed,
+                sample,
+            });
+        }
         Ok(())
     }
 
