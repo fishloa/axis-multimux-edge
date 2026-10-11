@@ -5,7 +5,7 @@ version = 4
 [[package]]
 name = "acap-logging"
 version = "0.1.1"
-source = "git+https://github.com/fishloa/acap-rs?rev=a809260df3ad7d27079a2e3edffd7dfd6c677cd3#a809260df3ad7d27079a2e3edffd7dfd6c677cd3"
+source = "git+https://github.com/fishloa/acap-rs?rev=c7f61bd80b21acb641ccce82ddc3b923c1927d72#c7f61bd80b21acb641ccce82ddc3b923c1927d72"
 dependencies = [
  "env_logger",
  "libsyslog",
@@ -15,7 +15,7 @@ dependencies = [
 [[package]]
 name = "acap-vapix"
 version = "0.0.0"
-source = "git+https://github.com/fishloa/acap-rs?rev=a809260df3ad7d27079a2e3edffd7dfd6c677cd3#a809260df3ad7d27079a2e3edffd7dfd6c677cd3"
+source = "git+https://github.com/fishloa/acap-rs?rev=c7f61bd80b21acb641ccce82ddc3b923c1927d72#c7f61bd80b21acb641ccce82ddc3b923c1927d72"
 dependencies = [
  "anyhow",
  "digest_auth",
@@ -188,7 +188,7 @@ dependencies = [
 [[package]]
 name = "axparameter"
 version = "0.0.0"
-source = "git+https://github.com/fishloa/acap-rs?rev=a809260df3ad7d27079a2e3edffd7dfd6c677cd3#a809260df3ad7d27079a2e3edffd7dfd6c677cd3"
+source = "git+https://github.com/fishloa/acap-rs?rev=c7f61bd80b21acb641ccce82ddc3b923c1927d72#c7f61bd80b21acb641ccce82ddc3b923c1927d72"
 dependencies = [
  "axparameter-sys",
  "glib",
@@ -198,7 +198,7 @@ dependencies = [
 [[package]]
 name = "axparameter-sys"
 version = "0.0.0"
-source = "git+https://github.com/fishloa/acap-rs?rev=a809260df3ad7d27079a2e3edffd7dfd6c677cd3#a809260df3ad7d27079a2e3edffd7dfd6c677cd3"
+source = "git+https://github.com/fishloa/acap-rs?rev=c7f61bd80b21acb641ccce82ddc3b923c1927d72#c7f61bd80b21acb641ccce82ddc3b923c1927d72"
 dependencies = [
  "bindgen 0.69.5",
  "glib-sys",
@@ -3564,7 +3564,7 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 [[package]]
 name = "vdo"
 version = "0.0.0"
-source = "git+https://github.com/fishloa/acap-rs?rev=a809260df3ad7d27079a2e3edffd7dfd6c677cd3#a809260df3ad7d27079a2e3edffd7dfd6c677cd3"
+source = "git+https://github.com/fishloa/acap-rs?rev=c7f61bd80b21acb641ccce82ddc3b923c1927d72#c7f61bd80b21acb641ccce82ddc3b923c1927d72"
 dependencies = [
  "glib",
  "glib-sys",
@@ -3577,7 +3577,7 @@ dependencies = [
 [[package]]
 name = "vdo-sys"
 version = "0.0.0"
-source = "git+https://github.com/fishloa/acap-rs?rev=a809260df3ad7d27079a2e3edffd7dfd6c677cd3#a809260df3ad7d27079a2e3edffd7dfd6c677cd3"
+source = "git+https://github.com/fishloa/acap-rs?rev=c7f61bd80b21acb641ccce82ddc3b923c1927d72#c7f61bd80b21acb641ccce82ddc3b923c1927d72"
 dependencies = [
  "bindgen 0.69.5",
  "glib-sys",
