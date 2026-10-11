@@ -17,7 +17,7 @@ use multimux::output::OutputKind;
 use crate::admin::StatusHandle;
 use crate::config::{Config, MAIN_NAME};
 use crate::profile::{CaptureSettings, parse_profile};
-use crate::profile_source::ProfileSource;
+use crate::profile_source::{BoxFuture, ProfileSource};
 
 /// Stream name every per-capture router serves under.
 pub const INNER_STREAM: &str = "s";
@@ -37,6 +37,14 @@ pub trait CaptureFactory: Send + Sync + 'static {
         window_segments: usize,
         label: String,
     ) -> Box<dyn CaptureHandle>;
+
+    /// Whether a capture with `settings` would join an encode the camera
+    /// already runs (so it would cost the encoder nothing). Asked before
+    /// starting a capture; captures that can join are let past the encode
+    /// cap and counted as shared until the capture itself reports.
+    fn joinable(&self, _settings: CaptureSettings) -> BoxFuture<'static, bool> {
+        Box::pin(async { false })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -161,6 +169,9 @@ impl Registry {
                 }
             };
 
+            // Also outside the lock: can this capture join an existing encode?
+            let joinable = self.factory.joinable(settings).await;
+
             let mut inner = self.lock();
             // The mapping may have changed while we were resolving.
             if target_of(&inner.config, name).as_ref() != Some(&target) {
@@ -184,7 +195,7 @@ impl Registry {
             let stamp = now.max(Instant::now());
             let max = inner.config.max_encodes;
             let in_use = own_encodes(&inner.captures);
-            if in_use >= max {
+            if !joinable && in_use >= max {
                 return Err(ServeError::EncoderBusy { in_use, max });
             }
             let cfg = &inner.config;
@@ -200,6 +211,7 @@ impl Registry {
             );
             let router = router(Arc::new(AppState::new(streams)));
             let status = StatusHandle::new();
+            status.set_shared_encode(joinable);
             let handle = self.factory.start(
                 settings,
                 route,
@@ -368,7 +380,7 @@ pub(crate) mod tests {
     pub(crate) struct Counts {
         pub started: AtomicUsize,
         pub stopped: AtomicUsize,
-        /// New fake captures report that they joined an existing encode.
+        /// `joinable` answers true: an existing encode can be joined.
         pub share: std::sync::atomic::AtomicBool,
     }
     pub(crate) struct FakeFactory(pub Arc<Counts>);
@@ -389,10 +401,13 @@ pub(crate) mod tests {
             _: String,
         ) -> Box<dyn CaptureHandle> {
             self.0.started.fetch_add(1, Ordering::SeqCst);
-            if self.0.share.load(Ordering::SeqCst) {
-                status.set_shared_encode(true);
-            }
+            let _ = status;
             Box::new(FakeHandle(self.0.clone()))
+        }
+
+        fn joinable(&self, _: CaptureSettings) -> crate::profile_source::BoxFuture<'static, bool> {
+            let share = self.0.share.load(Ordering::SeqCst);
+            Box::pin(async move { share })
         }
     }
 
@@ -801,12 +816,30 @@ pub(crate) mod tests {
         let t0 = Instant::now();
         reg.ensure("hi", t0).await.unwrap();
         reg.ensure("med", t0).await.unwrap();
+        // Counted as shared from the start, before the capture reports in.
         let s = reg.snapshot(t0);
         assert_eq!((s.encodes.in_use, s.encodes.max), (0, 1));
         assert!(s.streams.iter().all(|st| st.shared_encode));
         // An own encode still counts, and the cap still applies to the next.
         counts.share.store(false, Ordering::SeqCst);
         reg.ensure("main", t0).await.unwrap();
+        assert_eq!(reg.snapshot(t0).encodes.in_use, 1);
+    }
+
+    #[tokio::test]
+    async fn a_full_cap_still_admits_a_capture_that_can_join() {
+        let (reg, counts, _) = setup(&[("hi", "ACC_High")]);
+        let mut cfg = reg.config();
+        cfg.max_encodes = 1;
+        reg.apply(cfg);
+        let t0 = Instant::now();
+        reg.ensure("main", t0).await.unwrap();
+        assert!(matches!(
+            reg.ensure("hi", t0).await,
+            Err(ServeError::EncoderBusy { in_use: 1, max: 1 })
+        ));
+        counts.share.store(true, Ordering::SeqCst);
+        reg.ensure("hi", t0).await.unwrap();
         assert_eq!(reg.snapshot(t0).encodes.in_use, 1);
     }
 }
