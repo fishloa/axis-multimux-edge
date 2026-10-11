@@ -103,7 +103,7 @@ use broadcast_common::{Demand, Stage, Timestamp};
 use media_plane::ingress::{IngestSession, ProgramId, SessionEvent};
 use media_plane::trunk::RetentionClass;
 use transmux::pipeline::{Sample, TrackSpec};
-use vdo::{Map, Resolution, RunningStream, Stream, StreamBuilder, VdoFormat, VdoFrameType};
+use vdo::{Map, RunningStream, Stream, VdoFormat, VdoFrameType};
 
 use crate::Result;
 use crate::admin::EncodeShare;
@@ -230,34 +230,11 @@ impl VdoIngestSession {
         stop: &AtomicBool,
         on_encode: Box<dyn Fn(EncodeShare) + Send + Sync>,
     ) -> Result<Self> {
-        let crate::profile::CaptureSettings {
-            codec,
-            channel,
-            width,
-            height,
-            framerate,
-            gop_length,
-        } = *settings;
+        let codec = settings.codec;
         let (stream, shared_encode) = match join_existing_encode(settings) {
             Some((stream, id)) => (stream, Some(id)),
             None => {
-                let format = match codec {
-                    Codec::H264 => VdoFormat::VDO_FORMAT_H264,
-                    Codec::H265 => VdoFormat::VDO_FORMAT_H265,
-                };
-                // Only set a GOP length when the profile asks for one; otherwise
-                // the camera default stands and `scan_for_param_sets` waits
-                // for the next key frame, however far off dynamic GOP /
-                // Zipstream puts it (#669).
-                let mut builder = StreamBuilder::new()
-                    .channel(channel)
-                    .format(format)
-                    .resolution(Resolution::Exact { width, height })
-                    .framerate(framerate);
-                if let Some(gop) = gop_length {
-                    builder = builder.gop_length(gop);
-                }
-                let stream = builder.build()?;
+                let stream = Stream::from_settings(&own_encode_settings(settings))?;
                 log::info!(
                     "vdo: new encode {} for {}",
                     stream.id(),
@@ -386,6 +363,53 @@ impl VdoIngestSession {
     }
 }
 
+/// VDO settings for an encode of our own. Only a GOP length the profile
+/// sets is passed on (otherwise the camera's default stands and
+/// `scan_for_param_sets` waits for the next key frame, however far off
+/// dynamic GOP / Zipstream puts it, #669), plus the profile's encoder keys
+/// in the VDO settings the camera's RTSP server uses for them.
+fn own_encode_settings(settings: &crate::profile::CaptureSettings) -> Map {
+    let mut m = Map::new();
+    m.set_u32(c"channel", settings.channel);
+    m.set_u32(
+        c"format",
+        match settings.codec {
+            Codec::H264 => VdoFormat::VDO_FORMAT_H264.0 as u32,
+            Codec::H265 => VdoFormat::VDO_FORMAT_H265.0 as u32,
+        },
+    );
+    m.set_u32(c"width", settings.width);
+    m.set_u32(c"height", settings.height);
+    if settings.framerate > 0 {
+        m.set_u32(c"framerate", settings.framerate);
+    }
+    if let Some(gop) = settings.gop_length {
+        m.set_u32(c"gop_length", gop);
+    }
+    m.set_u32(c"buffer.count", 3);
+    let t = &settings.tuning;
+    let u32s = [
+        (c"compression", t.compression),
+        (c"rotation", t.rotation),
+        (c"rc.mode", t.rate_control.map(|r| r.vdo_mode())),
+        (c"bitrate", t.max_bitrate_kbps.map(|k| k * 1024)),
+        (c"abr.target_bitrate", t.abr_target_kbps.map(|k| k * 1024)),
+        (c"abr.retention_time", t.abr_retention_secs),
+        (c"zip.gop_mode", t.zip_dynamic_gop.map(u32::from)),
+        (c"zip.fps_mode", t.zip_dynamic_fps.map(u32::from)),
+        (c"zip.max_gop_length", t.zip_max_gop_length),
+    ];
+    for (key, value) in u32s {
+        if let Some(v) = value {
+            m.set_u32(key, v);
+        }
+    }
+    if let Some(mirror) = t.mirror {
+        m.set_bool(c"horizontal_flip", mirror);
+    }
+    m
+}
+
 /// How many clients the encode behind `running` has (VDO's `peers`), or 0
 /// if VDO doesn't say.
 fn encode_peers(running: &RunningStream) -> u32 {
@@ -494,6 +518,16 @@ fn describe_stream(s: &vdo::StreamInfo) -> crate::vdo_share::StreamDesc {
         height: m.get_u32(c"height", 0),
         framerate,
         gop_length: m.get_u32(c"gop_length", 0),
+        compression: m.get_u32(c"compression", u32::MAX),
+        rotation: m.get_u32(c"rotation", 0),
+        horizontal_flip: m.get_bool(c"horizontal_flip", false),
+        rc_mode: m.get_u32(c"rc.mode", u32::MAX),
+        bitrate: m.get_u32(c"bitrate", 0),
+        abr_target_bitrate: m.get_u32(c"abr.target_bitrate", 0),
+        abr_retention_time: m.get_u32(c"abr.retention_time", 0),
+        zip_gop_mode: m.get_u32(c"zip.gop_mode", 0),
+        zip_fps_mode: m.get_u32(c"zip.fps_mode", 0),
+        zip_max_gop_length: m.get_u32(c"zip.max_gop_length", 0),
     }
 }
 

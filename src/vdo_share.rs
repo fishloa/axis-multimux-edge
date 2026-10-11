@@ -7,7 +7,7 @@
 //! code turns VDO's stream list into [`StreamDesc`]s.
 
 use crate::convert::Codec;
-use crate::profile::CaptureSettings;
+use crate::profile::{CaptureSettings, Tuning};
 
 /// VDO's `format` value for each codec (`VDO_FORMAT_H264` = 0,
 /// `VDO_FORMAT_H265` = 1).
@@ -32,11 +32,39 @@ pub struct StreamDesc {
     pub framerate: u32,
     /// Key frame interval in frames; 0 when the stream doesn't say.
     pub gop_length: u32,
+    /// The stream's encoder settings, in the VDO units [`Tuning`] maps to.
+    pub compression: u32,
+    pub rotation: u32,
+    pub horizontal_flip: bool,
+    pub rc_mode: u32,
+    /// bit/s.
+    pub bitrate: u32,
+    /// bit/s.
+    pub abr_target_bitrate: u32,
+    pub abr_retention_time: u32,
+    pub zip_gop_mode: u32,
+    pub zip_fps_mode: u32,
+    pub zip_max_gop_length: u32,
+}
+
+/// Whether `s` has every encoder setting `t` sets.
+fn tuning_matches(t: &Tuning, s: &StreamDesc) -> bool {
+    let eq = |want: Option<u32>, have: u32| want.is_none_or(|w| w == have);
+    eq(t.compression, s.compression)
+        && eq(t.rotation, s.rotation)
+        && t.mirror.is_none_or(|m| m == s.horizontal_flip)
+        && eq(t.rate_control.map(|r| r.vdo_mode()), s.rc_mode)
+        && eq(t.max_bitrate_kbps.map(|k| k * 1024), s.bitrate)
+        && eq(t.abr_target_kbps.map(|k| k * 1024), s.abr_target_bitrate)
+        && eq(t.abr_retention_secs, s.abr_retention_time)
+        && eq(t.zip_dynamic_gop.map(u32::from), s.zip_gop_mode)
+        && eq(t.zip_dynamic_fps.map(u32::from), s.zip_fps_mode)
+        && eq(t.zip_max_gop_length, s.zip_max_gop_length)
 }
 
 /// The first sharable stream that delivers `want`: same channel, codec and
 /// size, the same frame rate unless `want` leaves it to the camera (0), and
-/// the same key frame interval if `want` sets one.
+/// the same key frame interval and encoder settings where `want` sets them.
 pub fn pick_shareable(streams: &[StreamDesc], want: &CaptureSettings) -> Option<u32> {
     streams
         .iter()
@@ -47,6 +75,7 @@ pub fn pick_shareable(streams: &[StreamDesc], want: &CaptureSettings) -> Option<
                 && (s.width, s.height) == (want.width, want.height)
                 && (want.framerate == 0 || s.framerate == want.framerate)
                 && want.gop_length.is_none_or(|g| s.gop_length == g)
+                && tuning_matches(&want.tuning, s)
         })
         .map(|s| s.id)
 }
@@ -63,6 +92,7 @@ mod tests {
             height: 2160,
             framerate: 25,
             gop_length: None,
+            tuning: Tuning::default(),
         }
     }
 
@@ -76,6 +106,16 @@ mod tests {
             height: 2160,
             framerate: 25,
             gop_length: 32,
+            compression: 30,
+            rotation: 0,
+            horizontal_flip: false,
+            rc_mode: 1,
+            bitrate: 0,
+            abr_target_bitrate: 0,
+            abr_retention_time: 604800,
+            zip_gop_mode: 0,
+            zip_fps_mode: 0,
+            zip_max_gop_length: 300,
         }
     }
 
@@ -163,5 +203,68 @@ mod tests {
             ..monolith_4k()
         };
         assert_eq!(pick_shareable(&[s], &w), Some(0x47));
+    }
+
+    #[test]
+    fn encoder_settings_the_profile_sets_must_match() {
+        use crate::profile::RateControl;
+        let tuned = |t: Tuning| CaptureSettings {
+            tuning: t,
+            ..want()
+        };
+        let s = monolith_4k();
+        assert_eq!(
+            pick_shareable(
+                &[s.clone()],
+                &tuned(Tuning {
+                    compression: Some(30),
+                    ..Tuning::default()
+                })
+            ),
+            Some(0x47)
+        );
+        for t in [
+            Tuning {
+                compression: Some(50),
+                ..Tuning::default()
+            },
+            Tuning {
+                rotation: Some(180),
+                ..Tuning::default()
+            },
+            Tuning {
+                mirror: Some(true),
+                ..Tuning::default()
+            },
+            Tuning {
+                rate_control: Some(RateControl::Mbr),
+                ..Tuning::default()
+            },
+            Tuning {
+                max_bitrate_kbps: Some(500),
+                ..Tuning::default()
+            },
+            Tuning {
+                zip_dynamic_gop: Some(true),
+                ..Tuning::default()
+            },
+            Tuning {
+                zip_max_gop_length: Some(600),
+                ..Tuning::default()
+            },
+        ] {
+            assert_eq!(pick_shareable(&[s.clone()], &tuned(t)), None, "{t:?}");
+        }
+        let mbr = StreamDesc {
+            rc_mode: 2,
+            bitrate: 512_000,
+            ..monolith_4k()
+        };
+        let t = Tuning {
+            rate_control: Some(RateControl::Mbr),
+            max_bitrate_kbps: Some(500),
+            ..Tuning::default()
+        };
+        assert_eq!(pick_shareable(&[mbr], &tuned(t)), Some(0x47));
     }
 }
