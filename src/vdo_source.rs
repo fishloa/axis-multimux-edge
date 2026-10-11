@@ -106,6 +106,7 @@ use transmux::pipeline::{Sample, TrackSpec};
 use vdo::{Map, Resolution, RunningStream, Stream, StreamBuilder, VdoFormat, VdoFrameType};
 
 use crate::Result;
+use crate::admin::EncodeShare;
 use crate::convert::{self, Codec, ParamSets};
 use crate::error::OriginError;
 
@@ -175,11 +176,11 @@ pub struct VdoIngestSession {
     running: Mutex<RunningStream>,
     /// Id of the existing encode this session joined, if it joined one.
     shared_encode: Option<u32>,
-    /// Told whether the encode is currently shared with another client:
-    /// once when the session opens, then whenever that changes.
-    on_shared: Box<dyn Fn(bool) + Send + Sync>,
-    /// Last value given to `on_shared`.
-    shared_now: bool,
+    /// Told how the encode relates to the camera's other clients: once when
+    /// the session opens, then whenever a joined encode's `peers` change.
+    on_encode: Box<dyn Fn(EncodeShare) + Send + Sync>,
+    /// Last `peers` given to `on_encode` for a joined encode.
+    last_peers: u32,
     last_peer_check: Instant,
     track_id: u32,
     codec: Codec,
@@ -221,14 +222,13 @@ impl VdoIngestSession {
     /// don't decode into a valid `TrackSpec` (propagated from
     /// [`convert::track_spec`]).
     ///
-    /// `on_shared` is told whether the encode is shared with another client
-    /// (true when the session joined an existing encode), once the stream
-    /// is open and again whenever that changes, e.g. when the encode's other
-    /// clients leave.
+    /// `on_encode` is told whether the session runs its own encode or joined
+    /// one (with that encode's client count), once the stream is open and
+    /// again whenever a joined encode's client count changes.
     pub fn new(
         settings: &crate::profile::CaptureSettings,
         stop: &AtomicBool,
-        on_shared: Box<dyn Fn(bool) + Send + Sync>,
+        on_encode: Box<dyn Fn(EncodeShare) + Send + Sync>,
     ) -> Result<Self> {
         let crate::profile::CaptureSettings {
             codec,
@@ -268,7 +268,11 @@ impl VdoIngestSession {
         };
 
         let running = stream.start()?;
-        on_shared(shared_encode.is_some());
+        let peers = shared_encode.map_or(0, |_| encode_peers(&running));
+        on_encode(match shared_encode {
+            Some(id) => EncodeShare::Joined { id, peers },
+            None => EncodeShare::Own,
+        });
 
         // Forcing a key frame on a joined encode adds one for everyone using
         // it, so there the scan first gives the encode's own GOP a chance.
@@ -279,8 +283,8 @@ impl VdoIngestSession {
         Ok(Self {
             running: Mutex::new(running),
             shared_encode,
-            on_shared,
-            shared_now: shared_encode.is_some(),
+            on_encode,
+            last_peers: peers,
             last_peer_check: Instant::now(),
             track_id: TRACK_ID,
             codec,
@@ -299,40 +303,23 @@ impl VdoIngestSession {
     }
 
     /// On a joined encode, every [`PEER_CHECK_INTERVAL`], re-read the
-    /// encode's `peers` and tell `on_shared` if this session became its only
-    /// client (it then carries the encode alone) or stopped being one.
+    /// encode's `peers` and tell `on_encode` when it changed, e.g. when the
+    /// camera's other clients of the encode leave.
     fn check_peers(&mut self) {
         let Some(id) = self.shared_encode else { return };
         if self.last_peer_check.elapsed() < PEER_CHECK_INTERVAL {
             return;
         }
         self.last_peer_check = Instant::now();
-        let running = self
-            .running
-            .get_mut()
-            .unwrap_or_else(PoisonError::into_inner);
-        let peers = match running.info() {
-            Ok(info) => info.get_u32(c"peers", 0),
-            Err(e) => {
-                log::debug!("vdo: can't read peers of encode {id}: {e}");
-                return;
-            }
-        };
-        if peers == 0 {
-            return; // not reported; keep the last answer
-        }
-        let shared = peers > 1;
-        if shared != self.shared_now {
-            log::info!(
-                "vdo: encode {id} now has {peers} client(s); {}",
-                if shared {
-                    "shared again"
-                } else {
-                    "we are its only client"
-                }
-            );
-            self.shared_now = shared;
-            (self.on_shared)(shared);
+        let peers = encode_peers(
+            self.running
+                .get_mut()
+                .unwrap_or_else(PoisonError::into_inner),
+        );
+        if peers != 0 && peers != self.last_peers {
+            log::info!("vdo: encode {id} now has {peers} client(s)");
+            self.last_peers = peers;
+            (self.on_encode)(EncodeShare::Joined { id, peers });
         }
     }
 
@@ -397,6 +384,18 @@ impl VdoIngestSession {
     }
 }
 
+/// How many clients the encode behind `running` has (VDO's `peers`), or 0
+/// if VDO doesn't say.
+fn encode_peers(running: &RunningStream) -> u32 {
+    match running.info() {
+        Ok(info) => info.get_u32(c"peers", 0),
+        Err(e) => {
+            log::debug!("vdo: can't read encode peers: {e}");
+            0
+        }
+    }
+}
+
 /// The existing encode a capture with `want` would join: one the camera
 /// already runs (for its RTSP clients, say) and VDO lets us share. The
 /// encoder fits about one and a half 4K25 encodes, and VDO hands a new
@@ -416,7 +415,7 @@ fn find_joinable(want: &crate::profile::CaptureSettings) -> Option<vdo::StreamIn
     let ours = own_identity();
     let candidates: Vec<vdo::StreamInfo> = streams
         .into_iter()
-        .filter(|s| identity(&s.settings) != ours)
+        .filter(|s| ours.as_deref() != Some(identity(&s.settings).as_str()))
         .collect();
     let descs: Vec<crate::vdo_share::StreamDesc> = candidates.iter().map(describe_stream).collect();
     let id = crate::vdo_share::pick_shareable(&descs, want)?;
@@ -469,12 +468,12 @@ fn identity(settings: &Map) -> String {
         .unwrap_or_default()
 }
 
-/// This process's VDO identity (its executable's name).
-fn own_identity() -> String {
+/// This process's VDO identity: VDO records the creating process's name,
+/// which on the camera is the executable's name (`multimuxedge`).
+fn own_identity() -> Option<String> {
     std::env::current_exe()
         .ok()
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
-        .unwrap_or_default()
 }
 
 /// The settings of an existing VDO stream that [`crate::vdo_share`] matches on.
