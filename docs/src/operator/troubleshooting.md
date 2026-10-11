@@ -18,7 +18,7 @@ Returns:
   "streams": [
     {
       "names": ["medium"],
-      "settings": "h264 1280x720@25 ch0",
+      "settings": "h264 1280x720@25 ch1",
       "state": "running",
       "running": true,
       "current_segment": 5,
@@ -26,7 +26,8 @@ Returns:
       "frames": 1234,
       "fps": 25.0,
       "idle_secs": 0,
-      "last_error": null
+      "last_error": null,
+      "shared_encode": false
     }
   ]
 }
@@ -36,14 +37,18 @@ Interpret the response as follows:
 
 - `last_error` non-null — a config load or capture setup failure at boot
   (e.g., a broken `axparameter` backend). The text describes why.
-- `encodes.in_use >= encodes.max` — the encoder is at or over capacity.
-  New stream requests will receive a 503.
+- `encodes.in_use >= encodes.max` — the app's own encodes are at the cap.
+  A stream that needs a new encode will receive a 503; one that can join an
+  encode the camera already runs still starts.
 - `streams` lists every active capture.
   - `names` — stream names being served by this capture (may be multiple if
     different streams map to the same profile).
-  - `settings` — capture codec, resolution, fps, and VDO channel, e.g. `h264 1280x720@25 ch0`.
+  - `settings` — capture codec, resolution, fps, and VDO channel, e.g. `h264 1280x720@25 ch1`.
   - `state` — `starting`, `running`, or `error`.
   - `last_error` — reason the stream failed, if any.
+  - `shared_encode` — `true` when the stream joined an encode the camera was
+    already running (for its RTSP clients, say); such streams don't count in
+    `encodes.in_use`.
 
 ## Stream URLs
 
@@ -76,8 +81,10 @@ All available encoder slots are in use. Check `/admin/status` to see
 
 - Wait for an idle stream to shut down (controlled by `idle_timeout_secs`
   in [Configuration](configuration.md)).
-- Increase `max_encodes` if the camera can handle more (the ARTPEC-6 handles
-  about 2 distinct encodes at full frame rate).
+- Map the stream to a profile the camera already streams, so it joins that
+  encode instead of needing its own.
+- Increase `max_encodes` if the camera can handle more (the ARTPEC-6 fits
+  about one and a half 4K25 encodes).
 - Reduce the number of active streams or stop other apps using the encoder
   (e.g., a VMS client).
 
@@ -125,13 +132,21 @@ a different framing, this assumption breaks. This is a code-level issue —
 see [Architecture](../contributor/architecture.md) for where `VdoIngestSession`
 does this conversion.
 
-## Low frame rate at 4K / 1080p
+## Low frame rate
 
-> **Known limitation:** on the P1448-LE (ARTPEC-6, AXIS OS 11.11), setting any
-explicit key-frame interval caps 4K capture at ~18 fps (the camera's default
-gives 25 fps, also over its own RTSP). The app no longer forces a key-frame
-interval; it only applies one when the stream profile sets
-`videokeyframeinterval`, so avoid setting it on 4K profiles.
+Frame rate drops when the camera runs more distinct encodes than its
+encoder fits; the P1448-LE (ARTPEC-6) fits about one and a half 4K25
+encodes, shared with the camera's RTSP clients. Check `/admin/status`:
+
+- A 4K stream with `"shared_encode": true` runs on an encode the camera
+  already had and costs nothing extra.
+- Each stream with `"shared_encode": false` is an encode of its own. Map
+  streams to profiles the camera already streams (the same camera,
+  resolution and frame rate) so they can join, or stop the extra streams.
+- `videokeyframeinterval` on a profile only joins an encode with that exact
+  interval, so leave it unset on 4K profiles.
+
+See [Sharing the camera's encodes](configuration.md#sharing-the-cameras-encodes).
 
 ## Full verification checklist
 

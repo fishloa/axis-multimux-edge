@@ -5,10 +5,6 @@ here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
-### Known limitation
-
-- on the P1448-LE (ARTPEC-6, AXIS OS 11.11), any explicit key-frame interval caps 4K capture at ~18 fps (camera default: 25 fps, also over its own RTSP). The app now only sets one when the stream profile sets `videokeyframeinterval`, so avoid setting it on 4K profiles.
-
 ### Added
 
 - **Stream profiles.** Map URL names to the camera's own stream profiles
@@ -20,6 +16,11 @@ here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 - `GET /admin/profiles` and an OpenAPI description at
   `GET /admin/openapi.json`; API reference on the docs site.
 - Redesigned admin page (Multimux Edge look, live status, light/dark).
+- **Encode sharing.** A stream joins an encode the camera is already running
+  for the same camera, codec, resolution and frame rate (e.g. for a VMS over
+  RTSP) instead of starting a second one. Joined streams run at full rate,
+  don't slow the camera's other clients, don't count against
+  `max_encodes`, and report `shared_encode: true` in `/admin/status`.
 
 ### Changed
 
@@ -31,10 +32,18 @@ here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 - **Breaking:** `GET /admin/status` now reports `encodes` and a `streams`
   list; the single-pipeline fields moved into each stream entry.
 - Config changes apply immediately; no restart.
+- Profiles without `camera=` now stream from camera 1 (the VAPIX default,
+  as the camera's RTSP server does), not the main preset's channel.
+- The app no longer forces a 1-second key-frame interval. It sets one only
+  when the profile sets `videokeyframeinterval`, waits for the first key
+  frame however long it takes (warning every 10 s), and asks the camera
+  for one at start.
 
 ### Fixed
 
-- 4K streams no longer capped at ~18 fps: the app stopped forcing a 1-second GOP on VDO captures and instead waits for the first key frame, however long it takes (it logs a warning every 10 s, and stops promptly when the capture is stopped).
+- 4K streams no longer capped at ~18 fps. The cap came from running a
+  second 4K encode next to the one the camera already ran for its RTSP
+  clients; the stream now joins that encode (25 fps on the P1448-LE).
 
 ## [0.2.0] - 2026-10-05
 
