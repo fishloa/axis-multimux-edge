@@ -37,11 +37,12 @@ tower     = { version = "0.5", features = ["util"] }
 # compiles against BOTH the firmware-11 SDK 1.15.1 and firmware-12 SDK sysroots,
 # (2) RunningStream::force_key_frame, and (3) joining an existing encode
 # (list_streams, Stream::from_settings, Stream::id, RunningStream::info and the
-# non-blocking next_buffer). Back to upstream once these land there.
-vdo          = { git = "https://github.com/fishloa/acap-rs", rev = "6791003e0d5d5fd5fbed58cd9b275083a584f64d", optional = true }
-axparameter  = { git = "https://github.com/fishloa/acap-rs", rev = "6791003e0d5d5fd5fbed58cd9b275083a584f64d", optional = true }
-acap-logging = { git = "https://github.com/fishloa/acap-rs", rev = "6791003e0d5d5fd5fbed58cd9b275083a584f64d", optional = true }
-acap-vapix   = { git = "https://github.com/fishloa/acap-rs", rev = "6791003e0d5d5fd5fbed58cd9b275083a584f64d", optional = true }
+# non-blocking next_buffer), and (4) RunningStream::next_buffer_timeout. Back to
+# upstream once these land there.
+vdo          = { git = "https://github.com/fishloa/acap-rs", rev = "574c4adf69a677cecd918ca3ead44fce660044d0", optional = true }
+axparameter  = { git = "https://github.com/fishloa/acap-rs", rev = "574c4adf69a677cecd918ca3ead44fce660044d0", optional = true }
+acap-logging = { git = "https://github.com/fishloa/acap-rs", rev = "574c4adf69a677cecd918ca3ead44fce660044d0", optional = true }
+acap-vapix   = { git = "https://github.com/fishloa/acap-rs", rev = "574c4adf69a677cecd918ca3ead44fce660044d0", optional = true }
 # `VdoIngestSession` (src/vdo_source.rs, device-gated) implements
 # `media_plane::ingress`'s `Stage`/`IngestSession` traits directly — multimux
 # 0.5 (issue #805) deleted `multimux::pipeline::{run_pipeline, SampleSource}`
@@ -65,3 +66,9 @@ default = []
 device = ["dep:vdo", "dep:axparameter", "dep:acap-logging", "dep:acap-vapix", "dep:broadcast-common", "dep:media-plane"]
 
 [dev-dependencies]
+
+# A panic anywhere ends the process, and the ACAP's `runMode: "respawn"`
+# restarts it, rather than leaving a dead capture thread that still looks
+# registered and running.
+[profile.release]
+panic = "abort"
