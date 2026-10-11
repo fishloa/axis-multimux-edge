@@ -243,7 +243,12 @@ distinct encodes (say 1080p and 720p) bring everything down to about
 20 fps.
 
 Profiles without `camera=` use camera 1, as the camera's RTSP server does,
-so a mapped profile matches the camera's own stream for that profile.
+so a mapped profile matches the camera's own stream for that profile. The
+main preset uses `main.channel` (default 0); RTSP numbers cameras from 1, so
+channel 0 is never one of the camera's RTSP encodes and `main` always runs
+an encode of its own. To share, map a stream to a profile instead, or set
+`main.channel` to 1 and match a resolution and frame rate the camera
+already streams.
 
 Setting `videokeyframeinterval` on a profile only joins an encode with
 that exact interval; otherwise the stream starts its own encode.
