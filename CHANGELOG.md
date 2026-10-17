@@ -3,6 +3,14 @@
 All notable changes to Multimux Edge (formerly `axis-origin`) are documented
 here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- **Dependencies bumped:** multimux 0.13, transmux 0.27, media-plane 0.7 and
+  broadcast-common 10, plus every other dependency to its latest compatible
+  version.
+
 ## [0.3.0] - 2026-10-11
 
 ### Added
