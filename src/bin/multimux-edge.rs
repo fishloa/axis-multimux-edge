@@ -51,6 +51,7 @@ use std::time::{Duration, Instant};
 
 use broadcast_common::Timestamp;
 use log::{error, info};
+use media_plane::ids::SegmentSeq;
 use media_plane::ingress::{HandshakePolicy, IngestDriver};
 use media_plane::trunk::TrunkConfig;
 use multimux::source::{DriverProgress, advance_route};
@@ -355,9 +356,11 @@ async fn run_vdo_capture(
         status.add_frames(1);
         if let Some(program) = driver.programs().next() {
             if let Some(trunk) = driver.trunk(program) {
-                let current_segment = trunk.last_closed_segment().map_or(0, |seq| seq + 1);
+                let current_segment = trunk
+                    .last_closed_segment()
+                    .map_or(SegmentSeq::new(0), SegmentSeq::saturating_next);
                 let current_part = trunk.parts_in_segment(current_segment).len() as u32;
-                status.set_position(current_segment, current_part);
+                status.set_position(current_segment.value(), current_part);
             }
         }
         if !driver.health().is_running() {
