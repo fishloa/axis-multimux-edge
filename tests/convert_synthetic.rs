@@ -65,10 +65,11 @@ fn extract_param_sets_none_without_both_sets() {
 fn track_spec_h264_has_timescale_and_non_empty_avcc() {
     let au = h264_au();
     let params = extract_param_sets(Codec::H264, &au).expect("SPS+PPS present");
-    let spec = track_spec(Codec::H264, &params, 1, 90_000).expect("valid H.264 param sets");
+    let spec = track_spec(Codec::H264, &params, transmux::TrackId::new(1), 90_000)
+        .expect("valid H.264 param sets");
 
     assert_eq!(spec.timescale, 90_000);
-    assert_eq!(spec.track_id, 1);
+    assert_eq!(spec.track_id, transmux::TrackId::new(1));
     match spec.config {
         transmux::pipeline::CodecConfig::Avc { config, .. } => {
             assert_eq!(config.config.sps.len(), 1, "avcC must carry the SPS");

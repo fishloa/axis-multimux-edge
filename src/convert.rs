@@ -10,6 +10,7 @@
 //! VDO; this module is host-buildable and host-testable (see
 //! `tests/convert_synthetic.rs`).
 
+use transmux::TrackId;
 use transmux::annexb::iter_annexb_nals;
 use transmux::avc_config::{AVCConfigurationBox, AVCDecoderConfigurationRecord};
 use transmux::hevc_config::{HEVCConfigurationBox, HEVCDecoderConfigurationRecord};
@@ -174,7 +175,7 @@ pub fn extract_param_sets(codec: Codec, annexb_au: &[u8]) -> Option<ParamSets> {
 pub fn track_spec(
     codec: Codec,
     params: &ParamSets,
-    track_id: u32,
+    track_id: TrackId,
     clock_rate: u32,
 ) -> Result<TrackSpec> {
     let config = match codec {
@@ -354,7 +355,7 @@ mod tests {
             pps: PPS.to_vec(),
             vps: None,
         };
-        assert!(track_spec(Codec::H264, &params, 1, 90_000).is_err());
+        assert!(track_spec(Codec::H264, &params, transmux::TrackId::new(1), 90_000).is_err());
     }
 
     #[test]
@@ -364,7 +365,7 @@ mod tests {
             pps: PPS.to_vec(),
             vps: None,
         };
-        assert!(track_spec(Codec::H265, &params, 1, 90_000).is_err());
+        assert!(track_spec(Codec::H265, &params, transmux::TrackId::new(1), 90_000).is_err());
     }
 
     #[test]

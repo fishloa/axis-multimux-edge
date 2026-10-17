@@ -104,6 +104,7 @@ use std::time::{Duration, Instant};
 use broadcast_common::{Demand, Stage, Timestamp};
 use media_plane::ingress::{IngestSession, ProgramId, SessionEvent};
 use media_plane::trunk::RetentionClass;
+use transmux::TrackId;
 use transmux::pipeline::{Sample, TrackSpec};
 use vdo::{Map, RunningStream, Stream, VdoFormat, VdoFrameType};
 
@@ -114,7 +115,7 @@ use crate::error::OriginError;
 
 /// Fixed single (video) track id — `VdoIngestSession` carries exactly one
 /// video track per stream.
-const TRACK_ID: u32 = 1;
+const TRACK_ID: TrackId = TrackId::new(1);
 
 /// This app's single program id — VDO captures exactly one camera channel
 /// per session, so there is exactly one program, always `ProgramId(0)`.
@@ -188,7 +189,7 @@ pub struct VdoIngestSession {
     /// Last `peers` given to `on_encode` for a joined encode.
     last_peers: u32,
     last_peer_check: Instant,
-    track_id: u32,
+    track_id: TrackId,
     codec: Codec,
     clock_rate: u32,
     specs: Vec<TrackSpec>,
