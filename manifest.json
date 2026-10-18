@@ -7,7 +7,7 @@
             "vendor": "rust-broadcast",
             "vendorUrl": "https://github.com/fishloa/axis-multimux-edge",
             "runMode": "respawn",
-            "version": "0.3.0"
+            "version": "0.3.1"
         },
         "configuration": {
             "reverseProxy": [

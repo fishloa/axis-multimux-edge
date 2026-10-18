@@ -2018,7 +2018,7 @@ dependencies = [
 
 [[package]]
 name = "multimux-edge"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "acap-logging",
  "acap-vapix",
