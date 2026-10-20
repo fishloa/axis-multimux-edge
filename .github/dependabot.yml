@@ -1,0 +1,35 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    # The acap-rs crates are git-pinned to a fishloa/acap-rs fork rev until
+    # the upstream PRs merge; Dependabot would move them to the fork's
+    # default branch.
+    ignore:
+      - dependency-name: vdo
+      - dependency-name: axparameter
+      - dependency-name: acap-logging
+      - dependency-name: acap-vapix
+    groups:
+      rust-broadcast:
+        patterns:
+          - multimux
+          - transmux
+          - media-plane
+          - broadcast-common
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns:
+          - "*"
