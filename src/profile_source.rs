@@ -1,7 +1,8 @@
 //! Where camera stream profiles come from. On the camera:
-//! [`VapixProfileSource`] calls VAPIX `streamprofile.cgi` through the
-//! acap-vapix local client (service-account credentials over D-Bus, local
-//! VAPIX at `http://127.0.0.12`). In tests: [`StaticProfileSource`].
+//! `VapixProfileSource` (device builds only) calls VAPIX `streamprofile.cgi`
+//! through the acap-vapix local client (service-account credentials over
+//! D-Bus, local VAPIX at `http://127.0.0.12`). In tests:
+//! [`StaticProfileSource`].
 
 use std::future::Future;
 use std::pin::Pin;
