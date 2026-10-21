@@ -17,7 +17,7 @@ jobs:
     name: host (lib + convert, no device feature)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Test (host, no device feature)
         run: cargo test --locked
       - name: Clippy (host, no device feature)
@@ -40,7 +40,7 @@ jobs:
           - { fw: "11", sdk: "1.15.1", ubuntu: "22.04", arch: aarch64 }
           - { fw: "11", sdk: "1.15.1", ubuntu: "22.04", arch: armv7hf }
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install build prerequisites
         run: |
@@ -145,7 +145,7 @@ jobs:
         run: cargo-acap-build --arch ${{ matrix.arch }} -- -p multimux-edge --features device
 
       - name: Upload .eap
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: multimux-edge-fw${{ matrix.fw }}-${{ matrix.arch }}
           path: target/acap/*.eap
@@ -160,10 +160,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Download every .eap built by the matrix
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: multimux-edge-*
           path: artifacts
@@ -219,7 +219,7 @@ jobs:
       group: pages
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install Rust (rustup, 1.97)
         run: |
@@ -252,10 +252,10 @@ jobs:
           echo '<meta http-equiv="refresh" content="0; url=multimux_edge/index.html">' > site/api/index.html
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: site
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
