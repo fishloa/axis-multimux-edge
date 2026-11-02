@@ -861,15 +861,15 @@ pub(crate) mod tests {
         reg.apply(cfg);
         counts.share.store(true, Ordering::SeqCst);
         let t0 = Instant::now();
-        reg.ensure("hi", t0).await.unwrap();
-        reg.ensure("med", t0).await.unwrap();
+        let _ = reg.ensure("hi", t0).await.unwrap();
+        let _ = reg.ensure("med", t0).await.unwrap();
         // Counted as shared from the start, before the capture reports in.
         let s = reg.snapshot(t0);
         assert_eq!((s.encodes.in_use, s.encodes.max), (0, 1));
         assert!(s.streams.iter().all(|st| st.shared_encode));
         // An own encode still counts, and the cap still applies to the next.
         counts.share.store(false, Ordering::SeqCst);
-        reg.ensure("main", t0).await.unwrap();
+        let _ = reg.ensure("main", t0).await.unwrap();
         assert_eq!(reg.snapshot(t0).encodes.in_use, 1);
     }
 
@@ -880,13 +880,13 @@ pub(crate) mod tests {
         cfg.max_encodes = 1;
         reg.apply(cfg);
         let t0 = Instant::now();
-        reg.ensure("main", t0).await.unwrap();
+        let _ = reg.ensure("main", t0).await.unwrap();
         assert!(matches!(
             reg.ensure("hi", t0).await,
             Err(ServeError::EncoderBusy { in_use: 1, max: 1 })
         ));
         counts.share.store(true, Ordering::SeqCst);
-        reg.ensure("hi", t0).await.unwrap();
+        let _ = reg.ensure("hi", t0).await.unwrap();
         assert_eq!(reg.snapshot(t0).encodes.in_use, 1);
     }
 
@@ -905,8 +905,8 @@ pub(crate) mod tests {
         let (reg, counts, _) = setup(&[("hi", "ACC_High"), ("lo", "ACC_Low")]);
         counts.share.store(true, Ordering::SeqCst);
         let t0 = Instant::now();
-        reg.ensure("hi", t0).await.unwrap();
-        reg.ensure("lo", t0).await.unwrap();
+        let _ = reg.ensure("hi", t0).await.unwrap();
+        let _ = reg.ensure("lo", t0).await.unwrap();
         // Both of our captures joined the same foreign encode 71.
         status_of(&reg, "hi").set_encode(EncodeShare::Joined { id: 71, peers: 3 });
         status_of(&reg, "lo").set_encode(EncodeShare::Joined { id: 71, peers: 3 });
@@ -926,7 +926,7 @@ pub(crate) mod tests {
         let (reg, counts, _) = setup(&[("hi", "ACC_High")]);
         counts.share.store(true, Ordering::SeqCst);
         let t0 = Instant::now();
-        reg.ensure("hi", t0).await.unwrap();
+        let _ = reg.ensure("hi", t0).await.unwrap();
         assert_eq!(reg.snapshot(t0).encodes.in_use, 0);
         status_of(&reg, "hi").set_encode(EncodeShare::Own);
         assert_eq!(reg.snapshot(t0).encodes.in_use, 1);
@@ -939,10 +939,10 @@ pub(crate) mod tests {
         let (reg, counts, _) = setup(&[("hi", "ACC_High")]);
         counts.share.store(true, Ordering::SeqCst);
         let t0 = Instant::now();
-        reg.ensure("hi", t0).await.unwrap();
+        let _ = reg.ensure("hi", t0).await.unwrap();
         status_of(&reg, "hi").set_encode(EncodeShare::Joined { id: 71, peers: 0 });
         counts.share.store(false, Ordering::SeqCst);
-        reg.ensure("main", t0).await.unwrap();
+        let _ = reg.ensure("main", t0).await.unwrap();
         status_of(&reg, "main").set_encode(EncodeShare::Own);
         let s = reg.snapshot(t0);
         assert_eq!(s.encodes.in_use, 1);

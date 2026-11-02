@@ -223,7 +223,7 @@ mod tests {
         let s = monolith_4k();
         assert_eq!(
             pick_shareable(
-                &[s.clone()],
+                std::slice::from_ref(&s),
                 &tuned(Tuning {
                     compression: Some(30),
                     ..Tuning::default()
@@ -261,7 +261,11 @@ mod tests {
                 ..Tuning::default()
             },
         ] {
-            assert_eq!(pick_shareable(&[s.clone()], &tuned(t)), None, "{t:?}");
+            assert_eq!(
+                pick_shareable(std::slice::from_ref(&s), &tuned(t)),
+                None,
+                "{t:?}"
+            );
         }
         let mbr = StreamDesc {
             rc_mode: 2,
