@@ -94,14 +94,16 @@ async fn main() {
     // app roughly every 250ms, so it served nothing at all. Silently serving
     // on defaults was wrong; refusing to serve is worse. Run on defaults and
     // report the reason through `/admin/status`.
-    let (store, store_open_error) = match AxParameterStore::new() {
-        Ok(store) => (Arc::new(store), None),
+    //
+    // The open failure is NOT tracked separately here: `AxParameterStore::unavailable`
+    // stores the reason in the store itself, and `store.load()` below turns it
+    // into a `LoadOutcome::Broken`, which `status.set_config_error` records.
+    // Keeping a second copy would just drift out of sync, so there is none.
+    let store = match AxParameterStore::new() {
+        Ok(store) => Arc::new(store),
         Err(e) => {
             error!("multimux-edge: axparameter store open failed, serving on defaults: {e}");
-            (
-                Arc::new(AxParameterStore::unavailable(e.to_string())),
-                Some(format!("config backend unavailable: {e}")),
-            )
+            Arc::new(AxParameterStore::unavailable(e.to_string()))
         }
     };
 
@@ -118,6 +120,12 @@ async fn main() {
     // pipeline (started below, on its own thread) clears/sets
     // `last_error`'s pipeline slot on every retry attempt, which would
     // otherwise erase this within moments of boot.
+    //
+    // This single `load()` covers BOTH failure modes: a store that failed to
+    // open (`AxParameterStore::unavailable`) reports its open error here as a
+    // `LoadOutcome::Broken`, and a store that opened but holds corrupt JSON
+    // reports `Broken` from `parse_stored`. Either way the reason lands in
+    // `status`'s config-error slot, which survives pipeline retries.
     let outcome = store.load();
     if let Some(reason) = outcome.error() {
         error!("multimux-edge: config load failed, running on defaults: {reason}");
@@ -354,14 +362,14 @@ async fn run_vdo_capture(
         // is one past it, or `0` before anything has closed yet; the part
         // count is how many parts that open segment has accumulated so far.
         status.add_frames(1);
-        if let Some(program) = driver.programs().next() {
-            if let Some(trunk) = driver.trunk(program) {
-                let current_segment = trunk
-                    .last_closed_segment()
-                    .map_or(SegmentSeq::new(0), SegmentSeq::saturating_next);
-                let current_part = trunk.parts_in_segment(current_segment).len() as u32;
-                status.set_position(current_segment.value(), current_part);
-            }
+        if let Some(program) = driver.programs().next()
+            && let Some(trunk) = driver.trunk(program)
+        {
+            let current_segment = trunk
+                .last_closed_segment()
+                .map_or(SegmentSeq::new(0), SegmentSeq::saturating_next);
+            let current_part = trunk.parts_in_segment(current_segment).len() as u32;
+            status.set_position(current_segment.value(), current_part);
         }
         if !driver.health().is_running() {
             break;

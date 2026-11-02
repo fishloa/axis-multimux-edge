@@ -21,7 +21,7 @@ jobs:
       - name: Test (host, no device feature)
         run: cargo test --locked
       - name: Clippy (host, no device feature)
-        run: cargo clippy --locked -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
       - name: Fmt check
         run: cargo fmt --all --check
 

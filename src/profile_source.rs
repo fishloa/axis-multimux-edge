@@ -130,10 +130,10 @@ mod device {
         fn list(&self) -> BoxFuture<'_, Result<Vec<CameraProfile>, String>> {
             Box::pin(async move {
                 let mut cache = self.cache.lock().await;
-                if let Some((at, list)) = cache.as_ref() {
-                    if at.elapsed() < CACHE_FOR {
-                        return Ok(list.clone());
-                    }
+                if let Some((at, list)) = cache.as_ref()
+                    && at.elapsed() < CACHE_FOR
+                {
+                    return Ok(list.clone());
                 }
                 let list = tokio::time::timeout(FETCH_TIMEOUT, Self::fetch())
                     .await
