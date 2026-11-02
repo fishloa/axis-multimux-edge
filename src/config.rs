@@ -310,13 +310,18 @@ mod tests {
 
     #[test]
     fn range_checks() {
-        let mut c = Config::default();
-        c.max_encodes = 0;
-        c.idle_timeout_secs = 4;
-        c.part_target_ms = 0;
-        c.window_segments = 0;
-        c.target_duration_secs = 0.0;
-        c.main.codec = "vp9".into();
+        let c = Config {
+            max_encodes: 0,
+            idle_timeout_secs: 4,
+            part_target_ms: 0,
+            window_segments: 0,
+            target_duration_secs: 0.0,
+            main: MainPreset {
+                codec: "vp9".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         let mut f = fields(c.validate());
         f.sort();
         assert_eq!(
@@ -330,9 +335,11 @@ mod tests {
                 "window_segments",
             ]
         );
-        let mut c = Config::default();
-        c.max_encodes = 9;
-        c.idle_timeout_secs = 601;
+        let c = Config {
+            max_encodes: 9,
+            idle_timeout_secs: 601,
+            ..Default::default()
+        };
         assert_eq!(fields(c.validate()).len(), 2);
     }
 
