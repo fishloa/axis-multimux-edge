@@ -19,7 +19,7 @@ path              = "src/bin/multimux-edge.rs"
 required-features = ["device"]
 
 [dependencies]
-multimux  = "0.16"
+multimux  = "0.17"
 transmux  = "0.30"
 tokio     = { version = "1", features = ["rt-multi-thread", "net", "macros", "time", "sync"] }
 tokio-util = "0.7"
