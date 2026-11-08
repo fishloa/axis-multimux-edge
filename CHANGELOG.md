@@ -3,10 +3,16 @@
 All notable changes to Multimux Edge (formerly `axis-origin`) are documented
 here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.4.0] - 2026-11-08
 
 ### Changed
 
+- **HLS playlists changed on the wire (from multimux 0.14+):** low-latency media
+  playlists now advertise delta updates (`CAN-SKIP-UNTIL`, `CAN-SKIP-DATERANGES`,
+  so `_HLS_skip` works), set `HOLD-BACK` to three target durations and always
+  carry `EXT-X-DISCONTINUITY-SEQUENCE`. A blocking reload that cannot be
+  satisfied now waits up to three target durations (at least 5 s) before
+  returning 503.
 - **Dependencies bumped:** multimux 0.17, transmux 0.30, media-plane 0.10 and
   broadcast-common 11, plus every other dependency to its latest compatible
   version.
