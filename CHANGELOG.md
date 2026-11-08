@@ -7,7 +7,7 @@ here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ### Changed
 
-- **Dependencies bumped:** multimux 0.16, transmux 0.30, media-plane 0.10 and
+- **Dependencies bumped:** multimux 0.17, transmux 0.30, media-plane 0.10 and
   broadcast-common 11, plus every other dependency to its latest compatible
   version.
 
