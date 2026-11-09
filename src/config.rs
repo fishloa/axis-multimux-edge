@@ -66,8 +66,6 @@ pub struct Config {
     pub streams: Vec<StreamMapping>,
     /// Name served by the bare `/hls/media.m3u8`; `null` = `main`.
     pub default_stream: Option<String>,
-    /// Maximum concurrent distinct encodes this app may hold (1–8).
-    pub max_encodes: u32,
     /// Seconds without requests before a stream's capture stops (5–600).
     pub idle_timeout_secs: u64,
     /// LL-HLS target segment duration, seconds.
@@ -84,7 +82,6 @@ impl Default for Config {
             main: MainPreset::default(),
             streams: Vec::new(),
             default_stream: None,
-            max_encodes: 2,
             idle_timeout_secs: 30,
             target_duration_secs: 4.0,
             part_target_ms: 500,
@@ -96,7 +93,7 @@ impl Default for Config {
 /// One validation failure, addressed by a JSON-path-like field name.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct FieldError {
-    /// e.g. `streams[1].name`, `max_encodes`.
+    /// e.g. `streams[1].name`, `idle_timeout_secs`.
     pub field: String,
     /// Human-readable reason.
     pub message: String,
@@ -151,9 +148,6 @@ impl Config {
         {
             errors.push(err("default_stream", format!("no stream named \"{d}\"")));
         }
-        if !(1..=8).contains(&self.max_encodes) {
-            errors.push(err("max_encodes", "must be 1–8"));
-        }
         if !(5..=600).contains(&self.idle_timeout_secs) {
             errors.push(err("idle_timeout_secs", "must be 5–600"));
         }
@@ -183,7 +177,7 @@ impl Config {
 }
 
 /// Wire shape accepted on load: v2 fields, plus the pre-v2 flat capture
-/// fields. Unknown fields (e.g. old `port`) are ignored.
+/// fields. Unknown fields (e.g. old `port` or `max_encodes`) are ignored.
 #[derive(Deserialize)]
 struct ConfigWire {
     main: Option<MainPreset>,
@@ -191,7 +185,6 @@ struct ConfigWire {
     streams: Vec<StreamMapping>,
     #[serde(default)]
     default_stream: Option<String>,
-    max_encodes: Option<u32>,
     idle_timeout_secs: Option<u64>,
     target_duration_secs: Option<f64>,
     part_target_ms: Option<u32>,
@@ -221,7 +214,6 @@ impl<'de> Deserialize<'de> for Config {
             main,
             streams: w.streams,
             default_stream: w.default_stream,
-            max_encodes: w.max_encodes.unwrap_or(dflt.max_encodes),
             idle_timeout_secs: w.idle_timeout_secs.unwrap_or(dflt.idle_timeout_secs),
             target_duration_secs: w.target_duration_secs.unwrap_or(dflt.target_duration_secs),
             part_target_ms: w.part_target_ms.unwrap_or(dflt.part_target_ms),
@@ -255,7 +247,6 @@ mod tests {
     #[test]
     fn default_is_valid_and_has_spec_values() {
         let c = Config::default();
-        assert_eq!(c.max_encodes, 2);
         assert_eq!(c.idle_timeout_secs, 30);
         assert!(c.streams.is_empty());
         assert_eq!(c.default_stream, None);
@@ -311,7 +302,6 @@ mod tests {
     #[test]
     fn range_checks() {
         let c = Config {
-            max_encodes: 0,
             idle_timeout_secs: 4,
             part_target_ms: 0,
             window_segments: 0,
@@ -329,24 +319,23 @@ mod tests {
             vec![
                 "idle_timeout_secs",
                 "main.codec",
-                "max_encodes",
                 "part_target_ms",
                 "target_duration_secs",
                 "window_segments",
             ]
         );
         let c = Config {
-            max_encodes: 9,
             idle_timeout_secs: 601,
             ..Default::default()
         };
-        assert_eq!(fields(c.validate()).len(), 2);
+        assert_eq!(fields(c.validate()).len(), 1);
     }
 
     #[test]
     fn migrates_old_flat_shape_and_ignores_port() {
         let old = r#"{"channel":1,"width":1280,"height":720,"framerate":25,"codec":"h265",
-            "target_duration_secs":2.0,"part_target_ms":333,"window_segments":6,"port":2999}"#;
+            "target_duration_secs":2.0,"part_target_ms":333,"window_segments":6,"port":2999,
+            "max_encodes":2}"#;
         let c: Config = serde_json::from_str(old).unwrap();
         assert_eq!(
             c.main,
@@ -362,7 +351,7 @@ mod tests {
         assert_eq!(c.part_target_ms, 333);
         assert_eq!(c.window_segments, 6);
         assert!(c.streams.is_empty());
-        assert_eq!(c.max_encodes, 2);
+        assert!(!serde_json::to_string(&c).unwrap().contains("max_encodes"));
     }
 
     #[test]

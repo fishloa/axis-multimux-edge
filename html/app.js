@@ -86,7 +86,6 @@
     $("f-main-height").value = cfg.main.height;
     $("f-main-framerate").value = cfg.main.framerate;
     $("f-main-codec").value = cfg.main.codec;
-    $("f-max-encodes").value = cfg.max_encodes;
     $("f-idle").value = cfg.idle_timeout_secs;
     $("f-target").value = cfg.target_duration_secs;
     $("f-part").value = cfg.part_target_ms;
@@ -108,13 +107,13 @@
       main: { channel: num("f-main-channel"), width: num("f-main-width"), height: num("f-main-height"),
               framerate: num("f-main-framerate"), codec: $("f-main-codec").value },
       streams, default_stream: def,
-      max_encodes: num("f-max-encodes"), idle_timeout_secs: num("f-idle"),
+      idle_timeout_secs: num("f-idle"),
       target_duration_secs: num("f-target"), part_target_ms: num("f-part"), window_segments: num("f-window"),
     };
   }
 
   const FIELD_IDS = { "main.channel": "f-main-channel", "main.width": "f-main-width", "main.height": "f-main-height",
-    "main.framerate": "f-main-framerate", "main.codec": "f-main-codec", max_encodes: "f-max-encodes",
+    "main.framerate": "f-main-framerate", "main.codec": "f-main-codec",
     idle_timeout_secs: "f-idle", target_duration_secs: "f-target", part_target_ms: "f-part", window_segments: "f-window" };
 
   function clearErrors() {
@@ -182,8 +181,7 @@
     try {
       const s = await (await fetch("admin/status")).json();
       const pill = $("encodes");
-      pill.textContent = `${s.encodes.in_use}/${s.encodes.max} encodes`;
-      pill.classList.toggle("full", s.encodes.in_use >= s.encodes.max);
+      pill.textContent = `${s.encodes.in_use} encodes`;
       $("config-error").hidden = !s.last_error;
       $("config-error").textContent = s.last_error || "";
       const body = $("status-rows");

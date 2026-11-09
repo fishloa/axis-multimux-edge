@@ -3,6 +3,17 @@
 All notable changes to Multimux Edge (formerly `axis-origin`) are documented
 here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Removed
+
+- **`max_encodes` and the `encoder busy` 503.** The app no longer caps its
+  own encodes: encoder capacity differs between camera models, so every
+  requested stream is started. `/admin/status` still reports
+  `encodes.in_use` but no longer has `encodes.max`, and the setting is gone
+  from the config page. A stored config that still has `max_encodes` loads
+  as before, with the field ignored.
+
 ## [0.4.0] - 2026-11-08
 
 ### Changed

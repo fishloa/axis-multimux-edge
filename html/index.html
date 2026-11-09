@@ -47,9 +47,8 @@
 
     <section id="encoder" class="panel">
       <h2>Encoder</h2>
-      <p class="hint">Max encodes counts the app&rsquo;s own encodes. A stream that joins an encode the camera already runs for its other clients (marked &ldquo;shared encode&rdquo; below) costs nothing and doesn&rsquo;t count. Every distinct encode shares the camera&rsquo;s encoder (the ARTPEC-6 fits about one and a half 4K25 encodes).</p>
+      <p class="hint">The app starts an encode for every distinct stream that is requested, with no cap: how many the encoder can carry depends on the camera. Every distinct encode, including the camera&rsquo;s own RTSP ones, shares the camera&rsquo;s encoder; past its capacity, frame rates drop. A stream that joins an encode the camera already runs for its other clients (marked &ldquo;shared encode&rdquo; below) costs nothing and isn&rsquo;t counted.</p>
       <div class="fields">
-        <label>Max encodes<input id="f-max-encodes" type="number" min="1" max="8"></label>
         <label>Stop idle stream after (s)<input id="f-idle" type="number" min="5" max="600"></label>
       </div>
     </section>

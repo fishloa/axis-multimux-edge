@@ -1,7 +1,9 @@
 //! Maps stream names to running captures. Captures start on the first
 //! request for a name, are shared by every name that resolves to the same
-//! [`CaptureSettings`], count against `max_encodes`, and stop when idle
-//! (see `sweep`) or when a config change unmaps them (see `apply`).
+//! [`CaptureSettings`], and stop when idle (see `sweep`) or when a config
+//! change unmaps them (see `apply`). There is no cap on concurrent encodes:
+//! what the encoder can carry varies by camera, so `encodes.in_use` is only
+//! reported.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
@@ -53,7 +55,6 @@ pub enum ServeError {
     ProfileUnavailable(String),
     ProfileMissing(String),
     Unsupported(String),
-    EncoderBusy { in_use: u32, max: u32 },
 }
 
 /// What a name points at.
@@ -193,11 +194,6 @@ impl Registry {
             // with the insert time (never earlier than the caller's `now`) so
             // a short idle timeout cannot sweep it on the very next tick.
             let stamp = now.max(Instant::now());
-            let max = inner.config.max_encodes;
-            let in_use = EncodeTally::of(&inner.captures).own;
-            if !joinable && in_use >= max {
-                return Err(ServeError::EncoderBusy { in_use, max });
-            }
             let cfg = &inner.config;
             let route = Arc::new(RouteHandle::new(
                 cfg.target_duration_secs,
@@ -315,16 +311,13 @@ impl Registry {
             .collect();
         streams.sort_by(|a, b| a.names.cmp(&b.names));
         RegistryStatus {
-            encodes: EncodeUsage {
-                in_use: usage.own,
-                max: inner.config.max_encodes,
-            },
+            encodes: EncodeUsage { in_use: usage.own },
             streams,
         }
     }
 }
 
-/// How many encodes our captures run, for `max_encodes`. A capture on an
+/// How many encodes our captures run, for `encodes.in_use`. A capture on an
 /// encode of its own counts; one that joined an encode the camera already
 /// runs doesn't, as long as some other client still uses that encode. Our
 /// captures on the same joined encode are grouped: once its `peers` are all
@@ -382,7 +375,6 @@ impl EncodeTally {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct EncodeUsage {
     pub in_use: u32,
-    pub max: u32,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -530,17 +522,15 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn encode_cap_rejects_third_distinct_capture() {
+    async fn every_distinct_capture_starts_without_an_encode_cap() {
         let (reg, counts, _) =
             setup(&[("hi", "ACC_High"), ("med", "ACC_Medium"), ("lo", "ACC_Low")]);
         let now = Instant::now();
-        let _ = reg.ensure("hi", now).await.unwrap();
-        let _ = reg.ensure("med", now).await.unwrap();
-        match reg.ensure("lo", now).await {
-            Err(ServeError::EncoderBusy { in_use: 2, max: 2 }) => {}
-            other => panic!("expected EncoderBusy, got {:?}", other.map(|_| ())),
+        for name in ["hi", "med", "lo", "main"] {
+            let _ = reg.ensure(name, now).await.unwrap();
         }
-        assert_eq!(counts.started.load(Ordering::SeqCst), 2);
+        assert_eq!(counts.started.load(Ordering::SeqCst), 4);
+        assert_eq!(reg.snapshot(now).encodes.in_use, 4);
     }
 
     #[tokio::test]
@@ -586,10 +576,7 @@ pub(crate) mod tests {
         }
     }
 
-    fn gated(
-        streams: &[(&str, &str)],
-        max: u32,
-    ) -> (Arc<Registry>, Arc<Counts>, Arc<GatedProfileSource>) {
+    fn gated(streams: &[(&str, &str)]) -> (Arc<Registry>, Arc<Counts>, Arc<GatedProfileSource>) {
         let counts = Arc::new(Counts::default());
         let src = Arc::new(GatedProfileSource {
             inner: StaticProfileSource::new(vec![
@@ -602,7 +589,6 @@ pub(crate) mod tests {
             gate: tokio::sync::Notify::new(),
         });
         let cfg = Config {
-            max_encodes: max,
             streams: streams
                 .iter()
                 .map(|(n, p)| StreamMapping {
@@ -652,7 +638,7 @@ pub(crate) mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn gated_concurrent_first_requests_start_exactly_one_capture() {
-        let (reg, counts, src) = gated(&[("medium", "ACC_Medium")], 2);
+        let (reg, counts, src) = gated(&[("medium", "ACC_Medium")]);
         let tasks: Vec<_> = (0..8).map(|_| spawn_ensure(&reg, "medium")).collect();
         wait_parked(&src, 8).await;
         src.gate.notify_waiters();
@@ -663,32 +649,8 @@ pub(crate) mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn cap_race_for_last_slot_has_one_winner() {
-        let (reg, counts, src) = gated(
-            &[("hi", "ACC_High"), ("med", "ACC_Medium"), ("lo", "ACC_Low")],
-            2,
-        );
-        // occupy one slot
-        let first = spawn_ensure(&reg, "hi");
-        wait_parked(&src, 1).await;
-        src.gate.notify_waiters();
-        join(first).await.unwrap();
-        let a = spawn_ensure(&reg, "med");
-        let b = spawn_ensure(&reg, "lo");
-        wait_parked(&src, 3).await;
-        src.gate.notify_waiters();
-        let (ra, rb) = (join(a).await, join(b).await);
-        let busy = |r: &Result<(), ServeError>| {
-            matches!(r, Err(ServeError::EncoderBusy { in_use: 2, max: 2 }))
-        };
-        assert!(ra.is_ok() != rb.is_ok(), "{ra:?} {rb:?}");
-        assert!(busy(&ra) || busy(&rb));
-        assert_eq!(counts.started.load(Ordering::SeqCst), 2);
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn remap_during_resolve_is_not_found_and_starts_nothing() {
-        let (reg, counts, src) = gated(&[("med", "ACC_Medium")], 2);
+        let (reg, counts, src) = gated(&[("med", "ACC_Medium")]);
         let t = spawn_ensure(&reg, "med");
         wait_parked(&src, 1).await;
         {
@@ -705,7 +667,7 @@ pub(crate) mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn main_change_during_resolve_uses_new_main() {
         // "NoRes" leaves width/height to the main preset.
-        let (reg, counts, src) = gated(&[("n", "NoRes")], 2);
+        let (reg, counts, src) = gated(&[("n", "NoRes")]);
         let t = spawn_ensure(&reg, "n");
         wait_parked(&src, 1).await;
         let new_width = {
@@ -773,7 +735,6 @@ pub(crate) mod tests {
         let mut cfg = reg.config();
         cfg.streams.retain(|s| s.name != "lo");
         cfg.default_stream = Some("med".into());
-        cfg.max_encodes = 3;
         reg.apply(cfg);
         assert_eq!(counts.stopped.load(Ordering::SeqCst), 0);
         let _ = reg.ensure("med", now).await.unwrap();
@@ -845,7 +806,7 @@ pub(crate) mod tests {
         let _ = reg.ensure("a", t0).await.unwrap();
         let _ = reg.ensure("b", t0).await.unwrap();
         let s = reg.snapshot(t0 + Duration::from_secs(3));
-        assert_eq!((s.encodes.in_use, s.encodes.max), (1, 2));
+        assert_eq!(s.encodes.in_use, 1);
         assert_eq!(s.streams.len(), 1);
         assert_eq!(s.streams[0].names, vec!["a".to_string(), "b".to_string()]);
         assert_eq!(s.streams[0].settings, "h264 1280x720@25 ch1");
@@ -854,39 +815,19 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn captures_sharing_an_existing_encode_do_not_count_against_the_cap() {
+    async fn captures_sharing_an_existing_encode_are_not_counted() {
         let (reg, counts, _) = setup(&[("hi", "ACC_High"), ("med", "ACC_Medium")]);
-        let mut cfg = reg.config();
-        cfg.max_encodes = 1;
-        reg.apply(cfg);
         counts.share.store(true, Ordering::SeqCst);
         let t0 = Instant::now();
         let _ = reg.ensure("hi", t0).await.unwrap();
         let _ = reg.ensure("med", t0).await.unwrap();
         // Counted as shared from the start, before the capture reports in.
         let s = reg.snapshot(t0);
-        assert_eq!((s.encodes.in_use, s.encodes.max), (0, 1));
+        assert_eq!(s.encodes.in_use, 0);
         assert!(s.streams.iter().all(|st| st.shared_encode));
-        // An own encode still counts, and the cap still applies to the next.
+        // An own encode still counts.
         counts.share.store(false, Ordering::SeqCst);
         let _ = reg.ensure("main", t0).await.unwrap();
-        assert_eq!(reg.snapshot(t0).encodes.in_use, 1);
-    }
-
-    #[tokio::test]
-    async fn a_full_cap_still_admits_a_capture_that_can_join() {
-        let (reg, counts, _) = setup(&[("hi", "ACC_High")]);
-        let mut cfg = reg.config();
-        cfg.max_encodes = 1;
-        reg.apply(cfg);
-        let t0 = Instant::now();
-        let _ = reg.ensure("main", t0).await.unwrap();
-        assert!(matches!(
-            reg.ensure("hi", t0).await,
-            Err(ServeError::EncoderBusy { in_use: 1, max: 1 })
-        ));
-        counts.share.store(true, Ordering::SeqCst);
-        let _ = reg.ensure("hi", t0).await.unwrap();
         assert_eq!(reg.snapshot(t0).encodes.in_use, 1);
     }
 
