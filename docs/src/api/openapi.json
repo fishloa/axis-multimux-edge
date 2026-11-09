@@ -186,7 +186,6 @@
         "required": [
           "main",
           "streams",
-          "max_encodes",
           "idle_timeout_secs",
           "target_duration_secs",
           "part_target_ms",
@@ -209,12 +208,6 @@
           "main": {
             "$ref": "#/components/schemas/MainPreset",
             "description": "Built-in capture preset."
-          },
-          "max_encodes": {
-            "type": "integer",
-            "format": "int32",
-            "description": "Maximum concurrent distinct encodes this app may hold (1–8).",
-            "minimum": 0
           },
           "part_target_ms": {
             "type": "integer",
@@ -244,16 +237,10 @@
       "EncodeUsage": {
         "type": "object",
         "required": [
-          "in_use",
-          "max"
+          "in_use"
         ],
         "properties": {
           "in_use": {
-            "type": "integer",
-            "format": "int32",
-            "minimum": 0
-          },
-          "max": {
             "type": "integer",
             "format": "int32",
             "minimum": 0
@@ -270,7 +257,7 @@
         "properties": {
           "field": {
             "type": "string",
-            "description": "e.g. `streams[1].name`, `max_encodes`."
+            "description": "e.g. `streams[1].name`, `idle_timeout_secs`."
           },
           "message": {
             "type": "string",

@@ -24,7 +24,6 @@ The configuration is a JSON object with the following top-level keys:
     }
   ],
   "default_stream": "medium",
-  "max_encodes": 2,
   "idle_timeout_secs": 30,
   "target_duration_secs": 4.0,
   "part_target_ms": 500,
@@ -55,7 +54,6 @@ The configuration is a JSON object with the following top-level keys:
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `max_encodes` | integer | `2` | Maximum concurrent encodes of the app's own (range 1–8). When the limit is reached, a stream that would need a new encode receives a 503 response. Streams that join an encode the camera already runs don't count (see [Sharing the camera's encodes](#sharing-the-cameras-encodes)). The camera's other clients (e.g., a VMS) use the same encoder budget. |
 | `idle_timeout_secs` | integer | `30` | Seconds of inactivity after which an idle stream shuts down its encode (range 5–600). This frees encoder resources for other streams. |
 
 ### LL-HLS Parameters
@@ -182,7 +180,6 @@ curl -u <user>:<pw> -X POST https://<cam>/local/multimuxedge/admin/config \
       }
     ],
     "default_stream": "medium",
-    "max_encodes": 2,
     "idle_timeout_secs": 30,
     "target_duration_secs": 4.0,
     "part_target_ms": 500,
@@ -206,7 +203,6 @@ A `POST /admin/config` is rejected with `400 Bad Request` if:
 - `target_duration_secs` is `<= 0`.
 - `part_target_ms` is `<= 0`.
 - `window_segments` is `<= 0`.
-- `max_encodes` is outside the range 1–8.
 - `idle_timeout_secs` is outside the range 5–600.
 
 **Note:** The app does NOT validate that a profile exists on the camera at config time.
@@ -228,16 +224,17 @@ and joins it. A joined stream:
 - costs the encoder nothing, so it runs at the full rate (4K at 25 fps)
   and doesn't slow the camera's other clients;
 - carries the existing encode's compression, Zipstream and overlay settings;
-- shows `"shared_encode": true` in `/admin/status` and doesn't count
-  against `max_encodes`;
+- shows `"shared_encode": true` in `/admin/status` and doesn't count in
+  `encodes.in_use`;
 - keeps running if the camera's other clients of that encode disconnect;
-  it then carries the encode alone and counts against `max_encodes` again
+  it then carries the encode alone and counts in `encodes.in_use` again
   (within about 5 seconds).
 
-A stream that has nothing to join gets an encode of its own, which counts
-against `max_encodes`. A stream that can join is let in even when
-`max_encodes` is reached. The app never joins its own encodes; streams that
-resolve to the same settings already share one capture. Every distinct encode shares the encoder budget, as
+A stream that has nothing to join gets an encode of its own, which counts in
+`encodes.in_use`. The app puts no cap on its encodes: what the encoder can
+carry differs between camera models, so every requested stream is started
+and `encodes.in_use` is only reported. The app never joins its own encodes;
+streams that resolve to the same settings already share one capture. Every distinct encode shares the encoder budget, as
 it would for an RTSP client: on the P1448-LE, a 4K stream plus two more
 distinct encodes (say 1080p and 720p) bring everything down to about
 20 fps.

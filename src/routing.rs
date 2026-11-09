@@ -129,9 +129,6 @@ fn serve_error(e: ServeError) -> Response {
     };
     match e {
         ServeError::NotFound => StatusCode::NOT_FOUND.into_response(),
-        ServeError::EncoderBusy { in_use, max } => {
-            unavailable(format!("encoder busy ({in_use}/{max} encodes in use)"))
-        }
         ServeError::ProfileMissing(p) => unavailable(format!("camera profile \"{p}\" not found")),
         ServeError::ProfileUnavailable(m) => {
             unavailable(format!("profile source unavailable: {m}"))
@@ -279,20 +276,6 @@ mod tests {
             build_forward_uri("/main/../x", None),
             Err(StatusCode::BAD_REQUEST)
         );
-    }
-
-    #[tokio::test]
-    async fn encoder_busy_is_503_with_retry_after_and_reason() {
-        let (app, _) = app(&[("hi", "ACC_High"), ("med", "ACC_Medium"), ("lo", "ACC_Low")]);
-        get(&app, "/hls/hi/media.m3u8").await;
-        get(&app, "/hls/med/media.m3u8").await;
-        let r = get(&app, "/hls/lo/media.m3u8").await;
-        assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(r.headers()[header::RETRY_AFTER], "5");
-        let body = axum::body::to_bytes(r.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        assert_eq!(&body[..], b"encoder busy (2/2 encodes in use)");
     }
 
     #[tokio::test]

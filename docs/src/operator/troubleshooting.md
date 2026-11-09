@@ -12,8 +12,7 @@ Returns:
 {
   "last_error": null,
   "encodes": {
-    "in_use": 1,
-    "max": 2
+    "in_use": 1
   },
   "streams": [
     {
@@ -37,9 +36,9 @@ Interpret the response as follows:
 
 - `last_error` non-null — a config load or capture setup failure at boot
   (e.g., a broken `axparameter` backend). The text describes why.
-- `encodes.in_use >= encodes.max` — the app's own encodes are at the cap.
-  A stream that needs a new encode will receive a 503; one that can join an
-  encode the camera already runs still starts.
+- `encodes.in_use` — how many encodes of its own the app is running. There
+  is no cap; past the camera's encoder capacity, frame rates drop (see
+  [Low frame rate](#low-frame-rate)).
 - `streams` lists every active capture.
   - `names` — stream names being served by this capture (may be multiple if
     different streams map to the same profile).
@@ -74,20 +73,6 @@ stream names.
 
 If a request to a stream URL returns 503, check the `Retry-After` header
 (typically 5 seconds) and look at the response body for details:
-
-### `encoder busy (N/M encodes in use)`
-
-All available encoder slots are in use. Check `/admin/status` to see
-`encodes.in_use` and `encodes.max`. Either:
-
-- Wait for an idle stream to shut down (controlled by `idle_timeout_secs`
-  in [Configuration](configuration.md)).
-- Map the stream to a profile the camera already streams, so it joins that
-  encode instead of needing its own.
-- Increase `max_encodes` if the camera can handle more (the ARTPEC-6 fits
-  about one and a half 4K25 encodes).
-- Reduce the number of active streams or stop other apps using the encoder
-  (e.g., a VMS client).
 
 ### `camera profile "X" not found`
 
