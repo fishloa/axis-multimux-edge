@@ -5,6 +5,19 @@ here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Changed
+
+- **ffmpeg-based players start on the first try.** The first playlist
+  request for a stream that has just started now waits until the stream has
+  one complete segment (up to the blocking-reload timeout), instead of
+  returning a playlist with only partial segments. ffmpeg, VLC and the tools
+  built on them (Frigate, go2rtc) skip partial segments and used to fail on
+  that first playlist. Low-latency players' follow-up requests are
+  unchanged; the cost is that their cold start also waits about one segment.
+- **Dependencies bumped:** multimux 0.20, transmux 0.32, media-plane 0.13 and
+  broadcast-common 13, plus every other dependency to its latest compatible
+  version.
+
 ### Removed
 
 - **`max_encodes` and the `encoder busy` 503.** The app no longer caps its
