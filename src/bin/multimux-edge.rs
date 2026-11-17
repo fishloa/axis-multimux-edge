@@ -52,7 +52,7 @@ use std::time::{Duration, Instant};
 use broadcast_common::Timestamp;
 use log::{error, info};
 use media_plane::ids::SegmentSeq;
-use media_plane::ingress::{HandshakePolicy, IngestDriver};
+use media_plane::ingress::{HandshakePolicy, IngestConfig, IngestDriver};
 use media_plane::trunk::TrunkConfig;
 use multimux::source::{DriverProgress, advance_route};
 use multimux::{Backoff, MultimuxError, RouteHandle};
@@ -314,13 +314,12 @@ async fn run_vdo_capture(
             reason: format!("VdoIngestSession init failed: {e}"),
         })?;
 
-    let trunk_config = TrunkConfig::new(
-        source_nz(DRIVER_TIMED_CAPACITY),
-        source_nz(DRIVER_SPARSE_CAPACITY),
-        source_nz(window_segments),
-        source_nz(DRIVER_EVENT_CAPACITY),
-        source_nz(DRIVER_PART_CAPACITY),
-    );
+    let trunk_config = TrunkConfig::default()
+        .with_timed_capacity(source_nz(DRIVER_TIMED_CAPACITY))
+        .with_sparse_capacity(source_nz(DRIVER_SPARSE_CAPACITY))
+        .with_segment_capacity(source_nz(window_segments))
+        .with_event_capacity(source_nz(DRIVER_EVENT_CAPACITY))
+        .with_part_capacity(source_nz(DRIVER_PART_CAPACITY));
     // VDO capture has no network handshake to bound: `VdoIngestSession::new`
     // already resolved everything synchronously, so `Established` is queued
     // before the very first `feed()` call even runs and is drained (promoting
@@ -331,9 +330,7 @@ async fn run_vdo_capture(
     let handshake = HandshakePolicy::establish_by(Timestamp::from_nanos(u64::MAX));
     let mut driver = IngestDriver::new(
         session,
-        trunk_config,
-        handshake,
-        media_plane::DEFAULT_MAX_PROGRAMS,
+        IngestConfig::new(handshake).with_trunk(trunk_config),
     );
     let mut progress = DriverProgress::new();
     let start = Instant::now();
@@ -393,7 +390,7 @@ async fn run_vdo_capture(
 }
 
 /// `NonZeroUsize::new(n).unwrap_or(MIN)` — every capacity this module passes
-/// to [`TrunkConfig::new`] is a fixed positive constant except
+/// to the [`TrunkConfig`] builders is a fixed positive constant except
 /// `window_segments`, which `Config::validate` (`src/admin.rs`) already
 /// rejects as `0` via the admin API; this is a second, structural backstop
 /// (degrading to capacity 1 rather than panicking) for that one
