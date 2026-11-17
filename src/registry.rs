@@ -7,14 +7,15 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use utoipa::ToSchema;
 
-use multimux::RouteHandle;
 use multimux::origin::{AppState, router};
-use multimux::output::OutputKind;
+use multimux::output::Output;
+use multimux::output::hls::{DEFAULT_PLAYLIST_NAME, HlsOutput};
+use multimux::{RouteConfig, RouteHandle};
 
 use crate::admin::{EncodeShare, StatusHandle};
 use crate::config::{Config, MAIN_NAME};
@@ -196,14 +197,18 @@ impl Registry {
             let stamp = now.max(Instant::now());
             let cfg = &inner.config;
             let route = Arc::new(RouteHandle::new(
-                cfg.target_duration_secs,
-                cfg.part_target_ms,
-                cfg.window_segments,
+                RouteConfig::default()
+                    .with_target_duration(Duration::from_secs_f64(cfg.target_duration_secs))
+                    .with_part_target(Duration::from_millis(cfg.part_target_ms.into()))
+                    .with_window_segments(cfg.window_segments),
             ));
             let mut streams = HashMap::new();
             streams.insert(
                 INNER_STREAM.to_string(),
-                (route.clone(), vec![OutputKind::LlHls.build()]),
+                (
+                    route.clone(),
+                    vec![Arc::new(HlsOutput::low_latency(DEFAULT_PLAYLIST_NAME)) as Arc<dyn Output>],
+                ),
             );
             let router = router(Arc::new(AppState::new(streams)));
             let status = StatusHandle::new();

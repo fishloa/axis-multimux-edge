@@ -68,7 +68,7 @@ fn track_spec_h264_has_timescale_and_non_empty_avcc() {
     let spec = track_spec(Codec::H264, &params, transmux::TrackId::new(1), 90_000)
         .expect("valid H.264 param sets");
 
-    assert_eq!(spec.timescale, 90_000);
+    assert_eq!(spec.timescale.get(), 90_000);
     assert_eq!(spec.track_id, transmux::TrackId::new(1));
     match spec.config {
         transmux::pipeline::CodecConfig::Avc { config, .. } => {
@@ -86,11 +86,12 @@ fn track_spec_h264_has_timescale_and_non_empty_avcc() {
 #[test]
 fn au_to_sample_h264_carries_timestamps_sync_and_data() {
     let au = h264_au();
-    let sample = au_to_sample(Codec::H264, &au, 90_000, 3000, true);
+    let sample = au_to_sample(Codec::H264, &au, 90_000, 3000, true).unwrap();
 
-    assert_eq!(sample.dts, Some(90_000));
-    assert_eq!(sample.pts, Some(90_000));
-    assert_eq!(sample.duration, Some(3000));
+    let timing = sample.timing.expect("timed sample");
+    assert_eq!(timing.dts(), Some(90_000));
+    assert_eq!(timing.pts(), Some(90_000));
+    assert_eq!(timing.duration(), Some(3000));
     assert!(sample.flags.is_sync);
     assert!(!sample.data.is_empty());
     // The Annex B start codes are stripped in favour of 4-byte length

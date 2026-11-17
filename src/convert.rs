@@ -10,6 +10,8 @@
 //! VDO; this module is host-buildable and host-testable (see
 //! `tests/convert_synthetic.rs`).
 
+use std::num::NonZeroU32;
+
 use transmux::TrackId;
 use transmux::annexb::iter_annexb_nals;
 use transmux::avc_config::{AVCConfigurationBox, AVCDecoderConfigurationRecord};
@@ -182,7 +184,9 @@ pub fn track_spec(
         Codec::H264 => avc_codec_config(params)?,
         Codec::H265 => hevc_codec_config(params)?,
     };
-    Ok(TrackSpec::new(track_id, clock_rate, config))
+    let timescale = NonZeroU32::new(clock_rate)
+        .ok_or_else(|| OriginError::Convert("clock rate is zero".to_string()))?;
+    Ok(TrackSpec::new(track_id, timescale, config))
 }
 
 fn avc_codec_config(params: &ParamSets) -> Result<CodecConfig> {
@@ -298,14 +302,14 @@ pub fn au_to_sample(
     pts_dts_ticks: i64,
     duration_ticks: u32,
     is_sync: bool,
-) -> Sample {
-    Sample::from_annexb(
+) -> Result<Sample> {
+    Ok(Sample::from_annexb(
         annexb_au,
         Some(pts_dts_ticks),
         Some(pts_dts_ticks),
         Some(duration_ticks),
         is_sync,
-    )
+    )?)
 }
 
 /// Convert a VDO µs-timestamp delta into track-timescale ticks.

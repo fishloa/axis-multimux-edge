@@ -368,7 +368,7 @@ impl VdoIngestSession {
             let pts_dts = convert::absolute_ticks(timestamp_us, self.clock_rate);
             return Ok(Some(convert::au_to_sample(
                 self.codec, &data, pts_dts, duration, is_sync,
-            )));
+            )?));
         }
     }
 }
@@ -801,7 +801,7 @@ impl Stage for VdoIngestSession {
                 self.prev_ts_us = Some(pending.timestamp_us);
                 let pts_dts = convert::absolute_ticks(pending.timestamp_us, self.clock_rate);
                 let sample =
-                    convert::au_to_sample(self.codec, &pending.data, pts_dts, duration, is_sync);
+                    convert::au_to_sample(self.codec, &pending.data, pts_dts, duration, is_sync)?;
                 self.pending.push_back(SessionEvent::Sample {
                     program: PROGRAM,
                     track_id: self.track_id,
