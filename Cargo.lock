@@ -65,15 +65,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "android_system_properties"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae221649c9976a6f6c56ae1facf410f3ddb33cc661c4b7b61020a912d4237fbc"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "anstream"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -184,12 +175,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
-name = "autocfg"
-version = "1.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
-
-[[package]]
 name = "aws-lc-rs"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -282,15 +267,6 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
-]
-
-[[package]]
-name = "backon"
-version = "1.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cffb0e931875b666fc4fcb20fee52e9bbd1ef836fd9e9e04ec21555f9f85f7ef"
-dependencies = [
- "fastrand",
 ]
 
 [[package]]
@@ -391,16 +367,20 @@ dependencies = [
 
 [[package]]
 name = "broadcast-auth"
-version = "0.5.2"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1082c1a466bca667d722ecfdbf9396e948a08dd7076ed1829cce7617c945d764"
+checksum = "3759a5fec0b8853cd7344caa2a2036919b1eb9d2c384cfe3b53d8c909978c212"
 dependencies = [
  "base64 0.23.1",
+ "broadcast-common",
+ "cookie",
+ "cookie_store",
  "form_urlencoded",
  "getrandom 0.4.3",
  "headers",
  "hex",
  "hmac",
+ "http",
  "http-auth",
  "lru",
  "md-5 0.11.0",
@@ -414,29 +394,28 @@ dependencies = [
 
 [[package]]
 name = "broadcast-client"
-version = "0.4.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43e71fd24563727f9a89c1074ce3056f37ff54ecac23dfb1c060f4465dd089ac"
+checksum = "f8d9ea37fca36b9ee7118c19b6df215b55bdb7faf325d97db724e7d750059076"
 dependencies = [
  "broadcast-auth",
  "broadcast-common",
  "broadcast-hls",
  "buffering-runtime",
- "cookie",
- "cookie_store",
  "dash-runtime",
  "dvb-si",
  "headers",
  "hls-runtime",
  "http",
+ "jiff",
  "mpeg-ts",
- "percent-encoding",
  "rtmp-runtime",
  "rtp-packet",
  "rtsp-runtime",
  "rustls-pki-types",
  "sdp-types",
  "sha2 0.11.1",
+ "smooth-runtime",
  "srt-runtime",
  "thiserror 2.0.21",
  "transmux",
@@ -446,27 +425,54 @@ dependencies = [
 
 [[package]]
 name = "broadcast-common"
-version = "11.0.0"
+version = "13.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd0f70ef9d36de67089e3a89f0630d9c38a791032249c5c34f1593f8143b6551"
+checksum = "1a4fb79cf9d7a8b9c1c4efc37b5b7fba7f921f42d1a6ca99a9fed86f5274314c"
 dependencies = [
- "chrono",
+ "base64 0.23.1",
  "erased-serde",
+ "headers",
  "hex",
+ "http",
+ "iso-639",
+ "jiff",
  "quick-xml",
  "serde",
+ "thiserror 2.0.21",
+ "url",
+]
+
+[[package]]
+name = "broadcast-dash"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2af0e1783cd3f0dc1a09469bc8a8d677e1a443b8432fac030fd2c94631d0aef0"
+dependencies = [
+ "broadcast-common",
+ "jiff",
+ "quick-xml",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "broadcast-hls"
-version = "0.6.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a164899d3f65209688b6b453e28b8cfafe4649a4492b2c050e0f20b0c57fd607"
+checksum = "3cb22a7264a29a63cb483474e302b283d947b950737cf1617d2973550c9957f0"
 dependencies = [
  "broadcast-common",
  "jiff",
  "serde",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "broadcast-smooth"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1340f45ef6f344d7580014418fafef2b94522b429e1b3a9bf72e9fd82fd2c50f"
+dependencies = [
+ "broadcast-common",
 ]
 
 [[package]]
@@ -480,12 +486,13 @@ dependencies = [
 
 [[package]]
 name = "buffering-runtime"
-version = "0.2.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e4c65111c39cf6ab5c10ab028ae89991c8f880d571f0ee518c2b74ea9c855c2"
+checksum = "d5af7a33e248e3c9e0c9a898abb9c210f13a7bccccf7dd4fb9b9399a71fa2cb9"
 dependencies = [
  "broadcast-common",
  "serde",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -505,12 +512,15 @@ name = "bytes"
 version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "caption-convert"
-version = "0.5.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ba9b277fadbd437d860c6a803391962583ab60db8fc7ffd9600b01e434f19b0"
+checksum = "912d4401f2350137bc011951028c13fb74250eb65f9b954dce137c6f62e72c10"
 dependencies = [
  "broadcast-common",
  "cc-data",
@@ -543,9 +553,9 @@ dependencies = [
 
 [[package]]
 name = "cc-data"
-version = "0.8.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ffdc5945726219a04e3d2107b02ba056c537375d39bf7541cdf6532e22fa3fc"
+checksum = "e1ed59b178db606db1fc71fbc89fe95c0b907c119b8bf641b68848cc9eb7463f"
 dependencies = [
  "broadcast-common",
  "serde",
@@ -592,17 +602,6 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.3.1",
  "rand_core 0.10.1",
-]
-
-[[package]]
-name = "chrono"
-version = "0.4.45"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
-dependencies = [
- "iana-time-zone",
- "num-traits",
- "windows-link 0.2.1",
 ]
 
 [[package]]
@@ -683,9 +682,9 @@ checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
 
 [[package]]
 name = "container-probe"
-version = "0.3.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1904b3351d297542335278526f787fdf7c09a16f0c25141a11e618485cdd21b8"
+checksum = "97bab7850c01367869a81d56420727977dd78bf5e229ede5f4bf1d433fa84b51"
 dependencies = [
  "broadcast-common",
 ]
@@ -833,15 +832,19 @@ dependencies = [
 
 [[package]]
 name = "dash-runtime"
-version = "0.3.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86af40f9cef42b9785130a00167c18217eeb94aee81df06477de88e5ea0153c4"
+checksum = "d15e63b42fcfd96b28520cdc77cb8125987297e9dcaaf509b242729e936f8552"
 dependencies = [
  "broadcast-common",
+ "broadcast-dash",
  "container-probe",
+ "headers",
+ "http",
  "jiff",
- "quick-xml",
+ "media-plane",
  "thiserror 2.0.21",
+ "tracing",
  "transmux",
  "url",
 ]
@@ -931,15 +934,62 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
-name = "dvb-si"
-version = "13.0.0"
+name = "dvb-bbframe"
+version = "15.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b951918aaba50ee250051142db7cf3993388e51763acf5b0e6f93b11d596d7ea"
+checksum = "3d27cd21917c9aec30a1fa93abcedb2353fa0c6da4a29959805169e2387b4bfa"
+dependencies = [
+ "broadcast-common",
+ "num_enum",
+ "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "dvb-si"
+version = "15.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6f9491cf238de659b5a16618541e414628a763472e0a61d19dab1a04fa03229"
 dependencies = [
  "broadcast-common",
  "bytes",
- "chrono",
  "encoding_rs",
+ "jiff",
+ "mpeg-ts",
+ "num_enum",
+ "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "dvb-stream"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7815d02e571f8285cca659e82b134ab36862ecdf3654327922547931bf8a9487"
+dependencies = [
+ "broadcast-common",
+ "bytes",
+ "dvb-si",
+ "dvb-t2mi",
+ "futures-core",
+ "mpeg-ts",
+ "rtp-packet",
+ "socket2",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "dvb-t2mi"
+version = "15.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81d53a971d792b3630831898e0e3d303db4292a3978edec2fa6b79be0f5cabd4"
+dependencies = [
+ "broadcast-common",
+ "bytes",
+ "dvb-bbframe",
+ "jiff",
  "mpeg-ts",
  "num_enum",
  "serde",
@@ -948,9 +998,9 @@ dependencies = [
 
 [[package]]
 name = "dvb-vbi"
-version = "0.6.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ec74c56ebe53a35cdcb2c94d0a8ed41cdb7a5707ce49c2022c11ecabf5e8d82"
+checksum = "9b966d835305103727b0497301e2044dbed33cf0a8fd220107267090638f4439"
 dependencies = [
  "broadcast-common",
  "serde",
@@ -1052,12 +1102,6 @@ name = "fallible-iterator"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
-
-[[package]]
-name = "fastrand"
-version = "2.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "find-msvc-tools"
@@ -1201,7 +1245,7 @@ dependencies = [
  "libc",
  "log",
  "rustversion",
- "windows-core 0.100.0",
+ "windows-core",
  "windows-sys 0.61.2",
 ]
 
@@ -1409,26 +1453,20 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hls-runtime"
-version = "0.12.0"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e2a63afd1358e950ac65a77fbdff5babc6be2cf3b5ff9e8b1d8ffccaa165195"
+checksum = "0333f59f3655f4c8e651cbbd4afc7d999b9a4ebc5ad2f726f3a48954ab339dc6"
 dependencies = [
- "backon",
- "broadcast-auth",
  "broadcast-common",
  "broadcast-hls",
  "bytes",
  "container-probe",
- "headers",
- "iso-639",
  "jiff",
  "media-plane",
- "reqwest 0.13.5",
+ "mpeg-ts",
  "serde",
  "thiserror 2.0.21",
  "timed-metadata",
- "tokio",
- "tokio-util",
  "transmux",
  "url",
 ]
@@ -1579,30 +1617,6 @@ dependencies = [
  "tokio",
  "tower-service",
  "tracing",
-]
-
-[[package]]
-name = "iana-time-zone"
-version = "0.1.65"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e31bc9ad994ba00e440a8aa5c9ef0ec67d5cb5e5cb0cc7f8b744a35b389cc470"
-dependencies = [
- "android_system_properties",
- "core-foundation-sys",
- "iana-time-zone-haiku",
- "js-sys",
- "log",
- "wasm-bindgen",
- "windows-core 0.62.2",
-]
-
-[[package]]
-name = "iana-time-zone-haiku"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f31827a206f56af32e590ba56d5d2d085f558508192593743f16b2306495269f"
-dependencies = [
- "cc",
 ]
 
 [[package]]
@@ -2043,16 +2057,21 @@ dependencies = [
 
 [[package]]
 name = "media-plane"
-version = "0.10.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ccfa0b6ff602687d6fc4b1424a5c55564b2d5c5dd2cf3e605388f5167023306"
+checksum = "41af66fe4d46f926cbb211d682a51fc00b368538d60a9be678e70dfc37bb6f0a"
 dependencies = [
  "broadcast-common",
+ "broadcast-hls",
  "bytes",
+ "caption-convert",
+ "container-probe",
+ "dvb-si",
  "event-listener",
  "parking_lot",
  "thiserror 2.0.21",
  "timed-metadata",
+ "tracing",
  "transmux",
 ]
 
@@ -2139,9 +2158,9 @@ dependencies = [
 
 [[package]]
 name = "mp4-emsg"
-version = "0.6.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71be7896741cebf4d8923cadedccbc7d44d9f57401f209113100365aeaf4fd55"
+checksum = "2fd7036d18a85b4b84b7c0ee90e766feb84cffe10d331ab5b845631a4feb03ac"
 dependencies = [
  "broadcast-common",
  "serde",
@@ -2150,9 +2169,9 @@ dependencies = [
 
 [[package]]
 name = "mpeg-pes"
-version = "0.7.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89fbc0b2c9bd417a252a362d0ef15841d8cd66817be754f2b78d283d7b01c4c1"
+checksum = "a48c68440538b6f16c4505fd0c25ade2e1d04eff5d9766f9e41dc5606b0ca196"
 dependencies = [
  "broadcast-common",
  "serde",
@@ -2161,9 +2180,9 @@ dependencies = [
 
 [[package]]
 name = "mpeg-ps"
-version = "0.7.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f4dfb528cec52685963fc5b993bcff43788b841e2e9abecf96f6ea36b18143e"
+checksum = "c83ef29403dcb0c521d4aa620efccc839660ccb4b112da711a5b4cab2a579137"
 dependencies = [
  "broadcast-common",
  "mpeg-pes",
@@ -2173,9 +2192,9 @@ dependencies = [
 
 [[package]]
 name = "mpeg-ts"
-version = "0.7.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2223d5e0ac2b26a859046855b3531d818a7c85fd9ddeaca1294f41e498201571"
+checksum = "1710b2ca0219ef6206d5f2a205f4628f936556d65adaec618f8aff75c16778f8"
 dependencies = [
  "broadcast-common",
  "bytes",
@@ -2185,27 +2204,29 @@ dependencies = [
 
 [[package]]
 name = "multimux"
-version = "0.17.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab5c17cd35343f9eb9ddf2ce88604507bfa15367e3667baf4fa79b99c88e2852"
+checksum = "a9c41bb71de13116c1907d3d0aa583c949b87c65e5b0741eb1794b272577a75f"
 dependencies = [
  "arc-swap",
  "async-trait",
  "axum",
- "backon",
  "broadcast-auth",
  "broadcast-client",
  "broadcast-common",
+ "broadcast-dash",
  "broadcast-hls",
+ "broadcast-smooth",
  "bytes",
- "caption-convert",
  "container-probe",
  "dash-runtime",
  "dvb-si",
+ "dvb-stream",
  "futures-util",
  "getrandom 0.4.3",
  "headers",
  "hls-runtime",
+ "http",
  "http-body",
  "hyper",
  "hyper-util",
@@ -2215,16 +2236,16 @@ dependencies = [
  "metrics-exporter-prometheus",
  "mpeg-ts",
  "parking_lot",
- "percent-encoding",
  "quick-xml",
  "reqwest 0.13.5",
  "rtmp-runtime",
+ "rtp-packet",
  "rtsp-runtime",
  "rustls",
  "sdp-types",
  "serde",
  "serde_json",
- "socket2",
+ "smooth-runtime",
  "srt-runtime",
  "thiserror 2.0.21",
  "timed-metadata",
@@ -2291,15 +2312,6 @@ name = "num-conv"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "521739c6d2bac4aa25192232afe6841231376b2b26d4d9fae5ecf8ca5772e441"
-
-[[package]]
-name = "num-traits"
-version = "0.2.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
-dependencies = [
- "autocfg",
-]
 
 [[package]]
 name = "num_enum"
@@ -2824,13 +2836,14 @@ dependencies = [
 
 [[package]]
 name = "rtmp-runtime"
-version = "0.9.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dddebe83ec0c96cd3e83bb9ca5813f8f67fd6526fbe207c232008b823d31e22f"
+checksum = "7850e7c0d8919e6eedd75083522e2c5c1e19414da071d44512a979ef9d712a0a"
 dependencies = [
  "broadcast-common",
  "bytes",
  "futures-util",
+ "percent-encoding",
  "subtle",
  "thiserror 2.0.21",
  "tokio",
@@ -2840,9 +2853,9 @@ dependencies = [
 
 [[package]]
 name = "rtp-packet"
-version = "0.6.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4499e3084241b58b889912a9f9977d7276fa70381e8559034d9c77d4d8b04e76"
+checksum = "86b7d3c026ba800c036959e973e505ccb4d07d0c077564f14a6824a06cd63777"
 dependencies = [
  "broadcast-common",
  "serde",
@@ -2851,11 +2864,12 @@ dependencies = [
 
 [[package]]
 name = "rtsp-runtime"
-version = "0.10.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "597f44ae92b7140bd110e5b868fff4bed556313c462d338e6b757317dbad4465"
+checksum = "ba7cebcabea0505c94f9cea9544d2a2ff5dc135096c3030a7f8e574bd79472a8"
 dependencies = [
  "broadcast-auth",
+ "broadcast-common",
  "bytes",
  "futures-util",
  "getrandom 0.4.3",
@@ -2863,23 +2877,26 @@ dependencies = [
  "memchr",
  "rtsp-types",
  "rustls",
+ "sdp-types",
  "thiserror 2.0.21",
  "tokio",
  "tokio-rustls",
  "tokio-util",
+ "url",
  "webpki-roots",
 ]
 
 [[package]]
 name = "rtsp-types"
-version = "0.1.3"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f47bf238c3da7994ef66a71724f385cb1ee25dcf04a156402d2727ad84dc1433"
+checksum = "033209952231eb086f69664a8adfe8758b2be3fa392109c03ff23c12fb0be5aa"
 dependencies = [
  "cookie-factory",
- "nom",
+ "time",
  "tinyvec",
  "url",
+ "winnow",
 ]
 
 [[package]]
@@ -3036,12 +3053,12 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "scte35-splice"
-version = "5.0.0"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bceaa8a0b66ab711a979c70cb13da1e68ef79bc975e08c4a54ee732ecffdc236"
+checksum = "3cb7908e3cc579c2eda05a5a3d30682acb6306249cfb48b944d23b80fbdf4321"
 dependencies = [
- "base64 0.23.1",
  "broadcast-common",
+ "mpeg-ts",
  "serde",
  "thiserror 2.0.21",
 ]
@@ -3278,6 +3295,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "149309498a5f7334b12ddae0cad8aba81ce785fe91755068867e017cf98fee46"
 
 [[package]]
+name = "smooth-runtime"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6f86169e404657ce3b6e671e181c33a53c3d89ca5ab87b109a475eb0a0bcafa"
+dependencies = [
+ "broadcast-common",
+ "broadcast-smooth",
+ "bytes",
+ "http",
+ "media-plane",
+ "thiserror 2.0.21",
+ "transmux",
+ "url",
+]
+
+[[package]]
 name = "socket2"
 version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3289,9 +3322,9 @@ dependencies = [
 
 [[package]]
 name = "srt-runtime"
-version = "0.8.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12fb3944cc9a3ce1f5ec2c3ed63325ac77d0d4502cfaf3f6eeef55840b2636c3"
+checksum = "24ad3aa9ca532c4891173fc93826e16943c5cca8f3bcaa025592a74e1f7e58f8"
 dependencies = [
  "aes",
  "aes-kw",
@@ -3301,12 +3334,14 @@ dependencies = [
  "getrandom 0.4.3",
  "hmac",
  "pbkdf2",
+ "percent-encoding",
  "serde",
  "sha1 0.11.0",
  "subtle",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
+ "url",
  "zeroize",
 ]
 
@@ -3475,9 +3510,9 @@ dependencies = [
 
 [[package]]
 name = "timed-metadata"
-version = "0.9.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3385ab39b9c731de0d04813440e3e164940328ad85c47e45404e3c0c8e0ebee"
+checksum = "bc84baafd43813640bc3c02447e175b1b5dc623fd85763b19b717bc8c5aab029"
 dependencies = [
  "broadcast-common",
  "broadcast-hls",
@@ -3743,14 +3778,16 @@ dependencies = [
 
 [[package]]
 name = "transmux"
-version = "0.30.0"
+version = "0.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a276448e6920e855994f181fc435b75445c70152b539197dcffe6a03cf5e4b8e"
+checksum = "cef484f8dfddde1a6bf741022e90a6689792948811f34cd851355b7d5acf8645"
 dependencies = [
  "aes",
  "base64 0.23.1",
  "broadcast-common",
+ "broadcast-dash",
  "broadcast-hls",
+ "broadcast-smooth",
  "bytes",
  "cbc",
  "cc-data",
@@ -3764,12 +3801,12 @@ dependencies = [
  "mpeg-ps",
  "mpeg-ts",
  "quick-xml",
+ "rtmp-runtime",
  "rtp-packet",
  "sdp-types",
  "serde",
  "subtle",
  "thiserror 2.0.21",
- "url",
  "zeroize",
 ]
 
@@ -3831,6 +3868,7 @@ dependencies = [
  "idna",
  "percent-encoding",
  "serde",
+ "serde_derive",
 ]
 
 [[package]]
@@ -4110,39 +4148,15 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
 name = "windows-core"
-version = "0.62.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8e83a14d34d0623b51dce9581199302a221863196a1dde71a7663a4c2be9deb"
-dependencies = [
- "windows-implement 0.60.2",
- "windows-interface 0.59.3",
- "windows-link 0.2.1",
- "windows-result 0.4.1",
- "windows-strings 0.5.1",
-]
-
-[[package]]
-name = "windows-core"
 version = "0.100.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "803590c6856f51d15fa2e9fabe4f4703122c8737f72ef2741b4ac09d4c2192f5"
 dependencies = [
- "windows-implement 0.100.0",
- "windows-interface 0.100.0",
+ "windows-implement",
+ "windows-interface",
  "windows-link 0.100.0",
- "windows-result 0.100.0",
- "windows-strings 0.100.0",
-]
-
-[[package]]
-name = "windows-implement"
-version = "0.60.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "053e2e040ab57b9dc951b72c264860db7eb3b0200ba345b4e4c3b14f67855ddf"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
+ "windows-result",
+ "windows-strings",
 ]
 
 [[package]]
@@ -4150,17 +4164,6 @@ name = "windows-implement"
 version = "0.100.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1bc1bc82e5a1b1a4d7255861b07881a0407b552f50a4d8543c0c7276fa96f6e8"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "windows-interface"
-version = "0.59.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f316c4a2570ba26bbec722032c4099d8c8bc095efccdc15688708623367e358"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4192,29 +4195,11 @@ checksum = "9b39de7c7fe78858b0144c50c3fc000bab3be17d5e9b85b1053871693c7f7415"
 
 [[package]]
 name = "windows-result"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7781fa89eaf60850ac3d2da7af8e5242a5ea78d1a11c49bf2910bb5a73853eb5"
-dependencies = [
- "windows-link 0.2.1",
-]
-
-[[package]]
-name = "windows-result"
 version = "0.100.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "44873a1ef61c85d5e2991db91fe656cfcf0731097e00dff1ac860f1cb3b752a0"
 dependencies = [
  "windows-link 0.100.0",
-]
-
-[[package]]
-name = "windows-strings"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7837d08f69c77cf6b07689544538e017c1bfcf57e34b4c0ff58e6c2cd3b37091"
-dependencies = [
- "windows-link 0.2.1",
 ]
 
 [[package]]
